@@ -111,6 +111,26 @@ export 'src/runtime/outcome_navigator.dart' show OutcomeNavigator;
 export 'src/runtime/engagement_reader.dart' show EngagementReader;
 
 // ---------------------------------------------------------------------------
+// Phase 5 — Strategies
+// ---------------------------------------------------------------------------
+
+// Abstract strategy contract.
+export 'src/strategies/strategy.dart' show Strategy;
+
+// Frozen config object bundling all four primitives + client.
+export 'src/strategies/form_config.dart' show FormConfig;
+
+// Prompt assembly helpers (useful for debugging and logging).
+export 'src/strategies/prompt_builder.dart'
+    show buildGenerativeSystemPrompt, buildGuidedSystemPrompt;
+
+// Generative strategy — every step from the LLM.
+export 'src/strategies/generative_strategy.dart' show GenerativeStrategy;
+
+// Guided strategy — LLM picks from a developer-supplied catalog.
+export 'src/strategies/guided_strategy.dart' show GuidedStrategy;
+
+// ---------------------------------------------------------------------------
 // Phase 6 — Input renderers
 // ---------------------------------------------------------------------------
 
