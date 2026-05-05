@@ -85,3 +85,33 @@ export 'src/llm/fake_llm_client.dart';
 
 // JSON Schema for GenerativeStrategy's per-turn LLM response.
 export 'src/llm/schemas.dart';
+
+// ---------------------------------------------------------------------------
+// Phase 4 — Runtime primitives
+// ---------------------------------------------------------------------------
+
+// ConstraintEnforcer — checks every LLM-emitted step and every user answer
+// against the active Constraint list. Exports the EnforcementResult sealed
+// family (Allowed, Replaced, Stop, Escalated).
+export 'src/runtime/constraint_enforcer.dart'
+    show
+        ConstraintEnforcer,
+        EnforcementResult,
+        Allowed,
+        Replaced,
+        Stop,
+        Escalated;
+
+// OutcomeNavigator — walks the OutcomeNode tree, computes the running
+// contract from the chosen path, and advances the session through the tree.
+export 'src/runtime/outcome_navigator.dart' show OutcomeNavigator;
+
+// EngagementReader — extracts an EngagementSignal from an LLM report or
+// from a deterministic heuristic over answer text and history.
+export 'src/runtime/engagement_reader.dart' show EngagementReader;
+
+// ---------------------------------------------------------------------------
+// Phase 6 — Input renderers
+// ---------------------------------------------------------------------------
+
+export 'src/widgets/inputs/inputs.dart';
