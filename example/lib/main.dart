@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:genuiform/genuiform.dart';
 
@@ -143,13 +145,25 @@ class _HomeScreenState extends State<HomeScreen> {
                     'Demo 2 — GymGeist onboarding (ladder + branch)',
                   ),
                 ),
+                const SizedBox(height: 12),
+
+                // ── Demo 3 — Dev tools (works without a real Vertex key) ────
+                FilledButton.icon(
+                  onPressed: () => _openScenario(
+                    const _DevToolsDemoScreen(),
+                  ),
+                  icon: const Icon(Icons.developer_mode),
+                  label: const Text(
+                    'Demo 3 — Dev tools (no API key needed)',
+                  ),
+                ),
 
                 // ── No-key hint ─────────────────────────────────────────────
                 if (!hasKey) ...[
                   const SizedBox(height: 16),
                   const Text(
                     'Paste your Vertex AI access token + GCP project ID above '
-                    'to enable the demos.',
+                    'to enable demos 1 and 2.',
                     style: TextStyle(fontStyle: FontStyle.italic),
                   ),
                 ],
@@ -158,6 +172,284 @@ class _HomeScreenState extends State<HomeScreen> {
           );
         },
       ),
+    );
+  }
+}
+
+// ── Dev tools demo screen ─────────────────────────────────────────────────────
+
+/// Demonstrates [OutcomeTreeView], [AnswerHistorySidebar], and [SplitUserDemo]
+/// using [FakeLlmClient] scripts — no real Vertex AI key required.
+class _DevToolsDemoScreen extends StatefulWidget {
+  const _DevToolsDemoScreen();
+
+  @override
+  State<_DevToolsDemoScreen> createState() => _DevToolsDemoScreenState();
+}
+
+class _DevToolsDemoScreenState extends State<_DevToolsDemoScreen>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tabs;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabs = TabController(length: 3, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _tabs.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Dev tools demo'),
+        bottom: TabBar(
+          controller: _tabs,
+          tabs: const [
+            Tab(text: 'Tree view'),
+            Tab(text: 'Answer history'),
+            Tab(text: 'Split demo'),
+          ],
+        ),
+      ),
+      body: TabBarView(
+        controller: _tabs,
+        children: const [
+          _OutcomeTreeTab(),
+          _AnswerHistoryTab(),
+          _SplitDemoTab(),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Tab 1: OutcomeTreeView ─────────────────────────────────────────────────────
+
+class _OutcomeTreeTab extends StatelessWidget {
+  const _OutcomeTreeTab();
+
+  @override
+  Widget build(BuildContext context) {
+    // GymGeist outcome tree from spec §11.2
+    final tree = Layer(
+      id: 'account_only',
+      contractDelta: Contract(fields: {
+        'email': const FieldSpec(type: 'String', required: true),
+        'name': const FieldSpec(type: 'String', required: true),
+      }),
+      handoff: null,
+      next: Layer(
+        id: 'with_workout_plan',
+        contractDelta: Contract(fields: {}),
+        handoff: null,
+        next: Branch(
+          id: 'nutrition_path',
+          options: [
+            BranchOption(
+              id: 'with_meal_plan',
+              criterion: 'user wants concrete meals planned',
+              contractDelta: null,
+              child: Outcome(
+                id: 'full_meal_plan',
+                contractDelta: Contract(fields: {}),
+                handoff: null,
+              ),
+            ),
+            BranchOption(
+              id: 'skip_nutrition',
+              criterion: 'user opts out of nutrition',
+              contractDelta: null,
+              child: Outcome(
+                id: 'workout_only',
+                contractDelta: Contract(fields: {}),
+                handoff: null,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Padding(
+          padding: EdgeInsets.all(12),
+          child: Text(
+            'GymGeist outcome tree — active path: account_only → with_workout_plan',
+            style: TextStyle(fontStyle: FontStyle.italic),
+          ),
+        ),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: OutcomeTreeView(
+              root: tree,
+              activePath: const ['account_only', 'with_workout_plan'],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ── Tab 2: AnswerHistorySidebar ────────────────────────────────────────────────
+
+class _AnswerHistoryTab extends StatelessWidget {
+  const _AnswerHistoryTab();
+
+  @override
+  Widget build(BuildContext context) {
+    final step1 = const QuizStepSpec(
+      id: 'email',
+      title: 'What is your email?',
+      inputType: QuizInputType.text,
+    );
+    final step2 = const QuizStepSpec(
+      id: 'goals',
+      title: 'What are your fitness goals?',
+      inputType: QuizInputType.multiChoice,
+    );
+    final step3 = const QuizStepSpec(
+      id: 'intensity',
+      title: 'How intense do you want your workouts?',
+      inputType: QuizInputType.slider,
+    );
+
+    final now = DateTime(2026, 5, 9, 12);
+    final history = [
+      Answer(
+        stepId: 'email',
+        stepSpec: step1,
+        answer: 'oskar@fr3n.tech',
+        timestamp: now,
+        engagement: EngagementSignal.strong,
+      ),
+      Answer(
+        stepId: 'goals',
+        stepSpec: step2,
+        answer: ['lose_weight', 'build_muscle'],
+        timestamp: now.add(const Duration(minutes: 1)),
+        engagement: EngagementSignal.strong,
+      ),
+      Answer(
+        stepId: 'intensity',
+        stepSpec: step3,
+        answer: 'idk',
+        timestamp: now.add(const Duration(minutes: 2)),
+        engagement: EngagementSignal.weak,
+      ),
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Padding(
+          padding: EdgeInsets.all(12),
+          child: Text(
+            'Sample session history — 3 answers with mixed engagement',
+            style: TextStyle(fontStyle: FontStyle.italic),
+          ),
+        ),
+        Expanded(child: AnswerHistorySidebar(history: history)),
+      ],
+    );
+  }
+}
+
+// ── Tab 3: SplitUserDemo ──────────────────────────────────────────────────────
+
+class _SplitDemoTab extends StatelessWidget {
+  const _SplitDemoTab();
+
+  // JSON helpers
+  static String _askStepJson({
+    required String id,
+    required String title,
+    String inputType = 'text',
+    String engagement = 'strong',
+  }) =>
+      jsonEncode({
+        'decision': 'ask_step',
+        'step': {'id': id, 'title': title, 'inputType': inputType},
+        'engagement': engagement,
+      });
+
+  static String _completeJson(String outcomeId) => jsonEncode({
+        'decision': 'complete',
+        'outcome': {'outcome_id': outcomeId, 'summary': 'Done.'},
+        'engagement': 'strong',
+      });
+
+  @override
+  Widget build(BuildContext context) {
+    // Engaged user: asks many questions, reaches deeper outcome
+    final engagedScript = FakeLlmClient(
+      scriptedResponses: [
+        _askStepJson(id: 'q1', title: 'What is your primary goal?'),
+        _askStepJson(id: 'q2', title: 'How many days per week?'),
+        _askStepJson(id: 'q3', title: 'Do you have any equipment?'),
+        _completeJson('book_call'),
+      ],
+    );
+
+    // Tired user: gets fewer questions, exits at first opportunity
+    final tiredScript = FakeLlmClient(
+      scriptedResponses: [
+        _askStepJson(
+          id: 'q1',
+          title: 'What is your name?',
+          engagement: 'weak',
+        ),
+        _completeJson('send_proposal'),
+      ],
+    );
+
+    final outcomes = Branch(
+      id: 'lead_split',
+      options: [
+        BranchOption(
+          id: 'book_call',
+          criterion: 'engaged, ready to commit',
+          contractDelta: null,
+          child: Outcome(
+            id: 'book_call',
+            contractDelta: Contract(fields: {}),
+            handoff: null,
+          ),
+        ),
+        BranchOption(
+          id: 'send_proposal',
+          criterion: 'needs more info',
+          contractDelta: null,
+          child: Outcome(
+            id: 'send_proposal',
+            contractDelta: Contract(fields: {}),
+            handoff: null,
+          ),
+        ),
+      ],
+    );
+
+    return SplitUserDemo(
+      contract: Contract(fields: {
+        'name': const FieldSpec(type: 'String', required: true),
+      }),
+      constraints: const [MaxSteps(value: 8)],
+      posture: Posture.salesDiscovery(),
+      outcomes: outcomes,
+      leftClient: engagedScript,
+      rightClient: tiredScript,
+      model: 'gemini-2.5-flash',
+      leftLabel: 'Engaged CTO (4 questions)',
+      rightLabel: 'Tired founder (2 questions)',
     );
   }
 }

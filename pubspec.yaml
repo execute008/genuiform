@@ -1,7 +1,9 @@
 name: genuiform
-description: "Generative UI Forms for Flutter — adaptive, typed forms powered by Vertex AI Gemini."
+description: "Generative UI Forms for Flutter — adaptive, typed forms powered by Vertex AI Gemini. Forms are typed functions with a posture and a tree of outcomes: generative inside, predictable outside."
 version: 0.1.0-dev
-homepage:
+repository: https://github.com/freye-tech/genuiform
+homepage: https://github.com/freye-tech/genuiform
+issue_tracker: https://github.com/freye-tech/genuiform/issues
 
 environment:
   sdk: ^3.8.0

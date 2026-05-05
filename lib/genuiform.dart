@@ -144,3 +144,12 @@ export 'src/widgets/genui_form.dart' show GenuiForm;
 export 'src/widgets/form_controller.dart' show FormController;
 export 'src/widgets/step_renderer.dart' show StepRenderer;
 export 'src/widgets/streaming_indicator.dart' show StreamingIndicator;
+
+// ---------------------------------------------------------------------------
+// Dev tools (opt-in, for demo / debugging)
+// ---------------------------------------------------------------------------
+
+export 'src/widgets/dev_tools/outcome_tree_view.dart' show OutcomeTreeView;
+export 'src/widgets/dev_tools/answer_history_sidebar.dart'
+    show AnswerHistorySidebar;
+export 'src/widgets/dev_tools/split_user_demo.dart' show SplitUserDemo;
