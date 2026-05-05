@@ -135,3 +135,12 @@ export 'src/strategies/guided_strategy.dart' show GuidedStrategy;
 // ---------------------------------------------------------------------------
 
 export 'src/widgets/inputs/inputs.dart';
+
+// ---------------------------------------------------------------------------
+// Phase 7 — GenuiForm widget + FormController + StepRenderer + StreamingIndicator
+// ---------------------------------------------------------------------------
+
+export 'src/widgets/genui_form.dart' show GenuiForm;
+export 'src/widgets/form_controller.dart' show FormController;
+export 'src/widgets/step_renderer.dart' show StepRenderer;
+export 'src/widgets/streaming_indicator.dart' show StreamingIndicator;
