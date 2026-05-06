@@ -126,17 +126,35 @@ class _GenuiFormState extends State<GenuiForm> {
   }
 
   void _handleEvent(StepEvent event) {
+    if (!mounted) return;
     setState(() => _lastEvent = event);
+
+    // Consumer callbacks may navigate or otherwise dispose this widget. Defer
+    // them past the current frame and re-check `mounted`, so a callback that
+    // calls e.g. `Navigator.replace(...)` inside its handoff doesn't trigger
+    // build/setState on a disposed [State].
+    void deferToNextFrame(VoidCallback fn) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        fn();
+      });
+    }
 
     switch (event) {
       case OutcomeReached(:final result):
-        widget.onComplete?.call(result);
+        if (widget.onComplete != null) {
+          deferToNextFrame(() => widget.onComplete!(result));
+        }
       case EscalationFired(:final rule):
-        widget.onEscalation?.call(rule);
+        if (widget.onEscalation != null) {
+          deferToNextFrame(() => widget.onEscalation!(rule));
+        }
       case StreamError(:final error):
-        widget.onError?.call(error);
+        if (widget.onError != null) {
+          deferToNextFrame(() => widget.onError!(error));
+        }
       case StepReady():
-        // Reset current value when a new step appears
+        // Reset current value when a new step appears.
         _currentValue = null;
       case LayerComplete():
       case BranchTaken():

@@ -193,6 +193,64 @@ void main() {
       verify(() => onComplete.call(any())).called(1);
     });
 
+    testWidgets(
+      'onComplete that disposes the GenuiForm does not throw setState-after-dispose',
+      (tester) async {
+        final outcome = Outcome(
+          id: 'lead_qualified',
+          contractDelta: Contract(fields: {}),
+          handoff: null,
+        );
+        final client = FakeLlmClient(scriptedResponses: [
+          _askStepJson(id: 'step_1', title: 'Name?'),
+          _completeJson(outcomeId: 'lead_qualified'),
+        ]);
+
+        // The host swaps the GenuiForm out for a different widget the moment
+        // onComplete fires, simulating a route replacement (the gymgeist
+        // integration pattern). Pre-fix, this triggered "setState called after
+        // dispose" because onComplete fired synchronously inside _handleEvent.
+        bool replaced = false;
+        late StateSetter setHostState;
+
+        await tester.pumpWidget(MaterialApp(
+          home: Scaffold(
+            body: StatefulBuilder(
+              builder: (context, setState) {
+                setHostState = setState;
+                if (replaced) {
+                  return const Center(child: Text('replacement'));
+                }
+                return GenuiForm(
+                  contract: Contract(fields: {
+                    'name': const FieldSpec(type: 'String', required: true),
+                  }),
+                  constraints: const [],
+                  posture: Posture.salesDiscovery(),
+                  outcomes: outcome,
+                  client: client,
+                  model: 'gemini-2.5-flash',
+                  onComplete: (_) {
+                    setHostState(() => replaced = true);
+                  },
+                );
+              },
+            ),
+          ),
+        ));
+        await tester.pumpAndSettle();
+
+        await tester.enterText(find.byType(TextField), 'Alice');
+        await tester.tap(find.text('Next'));
+        await tester.pumpAndSettle();
+
+        // Replacement widget rendered; no exception was thrown by the
+        // post-frame mounted-checked dispatch.
+        expect(find.text('replacement'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      },
+    );
+
     testWidgets('result panel shown when form completes', (tester) async {
       final outcome = Outcome(
         id: 'lead_qualified',
