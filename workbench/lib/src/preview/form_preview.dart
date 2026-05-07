@@ -2,7 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:genuiform/genuiform.dart';
 
 import '../registry/handoff_registry.dart';
+import 'a2ui_outcome_renderer.dart';
 import 'debug_strip.dart';
+
+/// PoC flag — when true, the form's `onComplete` callback hands over to the
+/// A2UI-driven outcome renderer instead of showing a `SnackBar`. Tracked in
+/// `A2UI_AGENDA.md` as option C.
+const bool _kUseA2uiHandoff =
+    bool.fromEnvironment('USE_A2UI_HANDOFF', defaultValue: false);
 
 /// Right-pane preview widget.
 ///
@@ -66,6 +73,10 @@ class _FormPreviewState extends State<FormPreview>
   /// When set, the escalation card replaces the form pane.
   EscalateIf? _activeEscalation;
 
+  /// When set (only with [_kUseA2uiHandoff] true), the A2UI outcome renderer
+  /// replaces the form pane after `onComplete` fires.
+  ({String outcomeId, SimulatedHandoff? handoff})? _activeA2uiHandoff;
+
   /// Drives the fade-in when the form first appears (triggered by re-keying).
   late final AnimationController _fadeController;
   late final Animation<double> _fadeAnim;
@@ -96,8 +107,17 @@ class _FormPreviewState extends State<FormPreview>
     if (!mounted) return;
     final outcomeId = result.reachedOutcome?.id;
     if (outcomeId == null) return;
-    final messenger = ScaffoldMessenger.of(context)..hideCurrentSnackBar();
     final handoff = widget.handoffMap[outcomeId];
+
+    // PoC option C — replace the form pane with the A2UI-rendered outcome.
+    if (_kUseA2uiHandoff) {
+      setState(() {
+        _activeA2uiHandoff = (outcomeId: outcomeId, handoff: handoff);
+      });
+      return;
+    }
+
+    final messenger = ScaffoldMessenger.of(context)..hideCurrentSnackBar();
     if (handoff == null) {
       messenger.showSnackBar(
         SnackBar(
@@ -124,6 +144,18 @@ class _FormPreviewState extends State<FormPreview>
 
   @override
   Widget build(BuildContext context) {
+    // When an A2UI handoff is active, show the genui-rendered outcome screen.
+    if (_activeA2uiHandoff != null) {
+      return A2uiOutcomeRenderer(
+        outcomeId: _activeA2uiHandoff!.outcomeId,
+        handoff: _activeA2uiHandoff!.handoff,
+        onRestart: () {
+          setState(() => _activeA2uiHandoff = null);
+          widget.onRestartRequested?.call();
+        },
+      );
+    }
+
     // When an escalation is active, show the escalation card instead of form.
     if (_activeEscalation != null) {
       return _EscalationCard(
