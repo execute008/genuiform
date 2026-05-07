@@ -17,6 +17,7 @@ class BuildResult {
     this.constraints,
     this.posture,
     this.outcomes,
+    this.handoffMap,
     required this.errors,
   });
 
@@ -24,6 +25,11 @@ class BuildResult {
   final List<Constraint>? constraints;
   final Posture? posture;
   final OutcomeNode? outcomes;
+
+  /// Side-table mapping each [Outcome.id] in the parsed tree to its
+  /// [SimulatedHandoff] entry (when the registry key resolved successfully).
+  /// Used by FormPreview to show a handoff toast on [GenuiForm.onComplete].
+  final Map<String, SimulatedHandoff>? handoffMap;
 
   /// Soft errors encountered during building (e.g. unknown handoff key).
   /// The four primitives may still be present; the form simply has a
@@ -41,8 +47,14 @@ class BuildResult {
 class DslBuilder {
   final List<ParseError> _errors = [];
 
+  /// Maps each [Outcome.id] (terminal node) to its [SimulatedHandoff] entry,
+  /// populated during the outcome tree walk. Used by the workbench to display
+  /// a handoff toast when [GenuiForm.onComplete] fires.
+  final Map<String, SimulatedHandoff> _handoffMap = {};
+
   BuildResult build(FormNode ast) {
     _errors.clear();
+    _handoffMap.clear();
 
     final contract = _buildContract(ast.contract);
     final constraints = _buildConstraints(ast.constraints);
@@ -54,6 +66,7 @@ class DslBuilder {
       constraints: constraints,
       posture: posture,
       outcomes: outcomes,
+      handoffMap: Map.unmodifiable(_handoffMap),
       errors: List.unmodifiable(_errors),
     );
   }
@@ -167,11 +180,25 @@ class DslBuilder {
   }
 
   Outcome _buildOutcomeTerminal(OutcomeTerminalNode node) {
+    // Record the handoff in the side-table before building the Outcome.
+    if (node.handoff != null) {
+      _registerHandoff(node.id, node.handoff!);
+    }
     return Outcome(
       id: node.id,
       contractDelta: _buildContract(node.contractDelta),
       handoff: node.handoff != null ? _resolveHandoff(node.handoff!) : null,
     );
+  }
+
+  /// Records the [SimulatedHandoff] for [outcomeId] in the side-table without
+  /// modifying the [Outcome] itself.
+  void _registerHandoff(String outcomeId, HandoffStubNode node) {
+    final entry = kHandoffRegistry[node.registryKey];
+    if (entry != null) {
+      _handoffMap[outcomeId] = entry;
+    }
+    // Errors for unknown keys are already reported by [_resolveHandoff].
   }
 
   Handoff? _resolveHandoff(HandoffStubNode node) {
@@ -185,8 +212,7 @@ class DslBuilder {
       ));
       return null;
     }
-    return (_) {
-      // Phase 6 wires the toast: show '${entry.label}' with icon '${entry.icon}'.
-    };
+    // The closure is a no-op — the workbench uses the side-table for toasts.
+    return (_) {};
   }
 }

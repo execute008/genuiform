@@ -1,5 +1,6 @@
 import 'package:genuiform/genuiform.dart';
 
+import '../registry/handoff_registry.dart';
 import 'builder.dart';
 import 'lexer.dart';
 import 'parse_error.dart';
@@ -15,6 +16,7 @@ class ParseResult {
     this.constraints,
     this.posture,
     this.outcomes,
+    this.handoffMap,
     required this.errors,
   });
 
@@ -29,6 +31,11 @@ class ParseResult {
 
   /// The outcome tree root, or null on fatal parse failure.
   final OutcomeNode? outcomes;
+
+  /// Side-table mapping each [Outcome.id] to its [SimulatedHandoff].
+  /// Used by [FormPreview] to show a toast when [GenuiForm.onComplete] fires.
+  /// Null on fatal parse failure.
+  final Map<String, SimulatedHandoff>? handoffMap;
 
   /// All errors encountered during lexing, parsing, or building.
   final List<ParseError> errors;
@@ -67,6 +74,7 @@ ParseResult parseDsl(String source) {
       constraints: buildResult.constraints,
       posture: buildResult.posture,
       outcomes: buildResult.outcomes,
+      handoffMap: buildResult.handoffMap,
       errors: buildResult.errors,
     );
   } on ParseError catch (e) {

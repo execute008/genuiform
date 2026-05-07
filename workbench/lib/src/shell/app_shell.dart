@@ -17,6 +17,7 @@ import 'split_view.dart';
 /// - A scenario [DropdownButton] populated from [kScenarios]
 /// - A "Run" [FilledButton] that re-parses synchronously and resets the form
 /// - A Reset [IconButton] (same behaviour as Run)
+/// - An "About" icon that opens a modal explaining the DSL constraint
 ///
 /// The body is a [SplitView]: left shows the editable DSL in [_LeftPane];
 /// right shows the live [FormPreview].
@@ -24,6 +25,7 @@ class AppShell extends StatefulWidget {
   const AppShell({
     required this.client,
     required this.model,
+    this.showMockBadge = false,
     super.key,
   });
 
@@ -32,6 +34,10 @@ class AppShell extends StatefulWidget {
 
   /// The Vertex AI model string (e.g. `'gemini-2.5-flash'`).
   final String model;
+
+  /// When true, a persistent MOCK badge is shown in the top bar.
+  /// Set when `--dart-define=USE_MOCK=true`.
+  final bool showMockBadge;
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -146,63 +152,136 @@ class _AppShellState extends State<AppShell> {
     final currentScenario =
         kScenarios.firstWhere((s) => s.id == _currentScenarioId);
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('genuiform workbench'),
-        actions: [
-          // ── Scenario picker ───────────────────────────────────────────────
-          DropdownButton<Scenario>(
-            value: currentScenario,
-            underline: const SizedBox.shrink(),
-            items: kScenarios
-                .map(
-                  (s) => DropdownMenuItem<Scenario>(
-                    value: s,
-                    child: Text(s.name),
-                  ),
+    // Build a side-table of outcomeId → SimulatedHandoff from the parsed DSL.
+    final handoffMap = _parseResult.handoffMap ?? const {};
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isMobile = constraints.maxWidth < 900;
+
+        Widget shellBody = SplitView(
+          left: _LeftPane(
+            dsl: _dsl,
+            parseResult: _parseResult,
+            onChanged: _onDslChanged,
+          ),
+          right: hasForm
+              ? FormPreview(
+                  key: ValueKey(_formKey),
+                  contract: _parseResult.contract!,
+                  constraints: _parseResult.constraints!,
+                  posture: _parseResult.posture!,
+                  outcomes: _parseResult.outcomes!,
+                  client: widget.client,
+                  model: widget.model,
+                  handoffMap: handoffMap,
+                  onRestartRequested: _runOrReset,
                 )
-                .toList(),
-            onChanged: (scenario) {
-              if (scenario == null) return;
-              _onScenarioPicked(scenario);
-            },
-          ),
-          const SizedBox(width: 12),
+              : const _NoParsedFormPlaceholder(),
+        );
 
-          // ── Run button ────────────────────────────────────────────────────
-          FilledButton(
-            onPressed: _runOrReset,
-            child: const Text('Run'),
-          ),
-          const SizedBox(width: 8),
+        if (isMobile) {
+          shellBody = _MobileLayout(
+            left: _LeftPane(
+              dsl: _dsl,
+              parseResult: _parseResult,
+              onChanged: _onDslChanged,
+            ),
+            right: hasForm
+                ? FormPreview(
+                    key: ValueKey(_formKey),
+                    contract: _parseResult.contract!,
+                    constraints: _parseResult.constraints!,
+                    posture: _parseResult.posture!,
+                    outcomes: _parseResult.outcomes!,
+                    client: widget.client,
+                    model: widget.model,
+                    handoffMap: handoffMap,
+                    onRestartRequested: _runOrReset,
+                  )
+                : const _NoParsedFormPlaceholder(),
+          );
+        }
 
-          // ── Reset button ──────────────────────────────────────────────────
-          IconButton(
-            tooltip: 'Reset',
-            onPressed: _runOrReset,
-            icon: const Icon(Icons.refresh),
+        return Scaffold(
+          appBar: AppBar(
+            title: const Text('genuiform workbench'),
+            actions: [
+              // ── Mock badge ────────────────────────────────────────────────
+              if (widget.showMockBadge) ...[
+                Chip(
+                  label: const Text('MOCK'),
+                  backgroundColor: Colors.amber.shade700,
+                  labelStyle: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                  ),
+                  padding: EdgeInsets.zero,
+                  visualDensity: VisualDensity.compact,
+                ),
+                const SizedBox(width: 8),
+              ],
+
+              // ── Scenario picker ───────────────────────────────────────────
+              DropdownButton<Scenario>(
+                value: currentScenario,
+                underline: const SizedBox.shrink(),
+                items: kScenarios
+                    .map(
+                      (s) => DropdownMenuItem<Scenario>(
+                        value: s,
+                        child: Text(s.name),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (scenario) {
+                  if (scenario == null) return;
+                  _onScenarioPicked(scenario);
+                },
+              ),
+              const SizedBox(width: 12),
+
+              // ── Run button ────────────────────────────────────────────────
+              FilledButton(
+                onPressed: _runOrReset,
+                child: const Text('Run'),
+              ),
+              const SizedBox(width: 8),
+
+              // ── Reset button ──────────────────────────────────────────────
+              IconButton(
+                tooltip: 'Reset',
+                onPressed: _runOrReset,
+                icon: const Icon(Icons.refresh),
+              ),
+
+              // ── About button ──────────────────────────────────────────────
+              IconButton(
+                tooltip: 'About this workbench',
+                onPressed: () => _showAboutDialog(context),
+                icon: const Icon(Icons.info_outline),
+              ),
+              const SizedBox(width: 8),
+            ],
           ),
-          const SizedBox(width: 8),
-        ],
-      ),
-      body: SplitView(
-        left: _LeftPane(
-          dsl: _dsl,
-          parseResult: _parseResult,
-          onChanged: _onDslChanged,
-        ),
-        right: hasForm
-            ? FormPreview(
-                key: ValueKey(_formKey),
-                contract: _parseResult.contract!,
-                constraints: _parseResult.constraints!,
-                posture: _parseResult.posture!,
-                outcomes: _parseResult.outcomes!,
-                client: widget.client,
-                model: widget.model,
-              )
-            : const _NoParsedFormPlaceholder(),
-      ),
+          body: isMobile
+              ? Column(
+                  children: [
+                    _MobileBanner(onDismiss: () => setState(() {})),
+                    Expanded(child: shellBody),
+                  ],
+                )
+              : shellBody,
+        );
+      },
+    );
+  }
+
+  void _showAboutDialog(BuildContext context) {
+    showDialog<void>(
+      context: context,
+      builder: (context) => const _AboutDialog(),
     );
   }
 }
@@ -356,6 +435,172 @@ class _NoParsedFormPlaceholder extends StatelessWidget {
               color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
       ),
+    );
+  }
+}
+
+// ── About dialog ───────────────────────────────────────────────────────────────
+
+class _AboutDialog extends StatelessWidget {
+  const _AboutDialog();
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('About the workbench'),
+      content: const SizedBox(
+        width: 480,
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'DSL editor, not a Dart compiler',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              SizedBox(height: 8),
+              Text(
+                'This editor is a DSL parser, not a Dart compiler. Flutter Web '
+                'cannot compile Dart at runtime, so we accept a constrained '
+                'Dart-shaped DSL and parse it into real genuiform types. '
+                'Anything outside the grammar is a parse error displayed inline.',
+              ),
+              SizedBox(height: 16),
+              Text(
+                'What this means for you',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              SizedBox(height: 8),
+              Text(
+                'The DSL is a strict subset of Dart. No conditionals, no helpers, '
+                'no imports — just literal config trees. Posture presets '
+                '(salesDiscovery, supportiveOnboarding, clinicalIntake), '
+                'constraints, and outcome trees are all supported. Custom '
+                'callback functions are replaced by named registry entries '
+                '(e.g. Handoff(onReached: bookCalendly)).',
+              ),
+              SizedBox(height: 16),
+              Text(
+                'What this gets you',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              SizedBox(height: 8),
+              Text(
+                'Pure Flutter Web — no backend, no compilation pipeline, zero '
+                'stage risk. Edits re-parse within 250ms and rebuild the live '
+                'form on the right. Looks identical to real Dart to a judge '
+                'watching over your shoulder.',
+              ),
+              SizedBox(height: 16),
+              Divider(),
+              SizedBox(height: 8),
+              Text(
+                'genuiform workbench — Spec v0.1, May 2026\n'
+                'See README.md for the full library documentation.',
+                style: TextStyle(fontSize: 11),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Close'),
+        ),
+      ],
+    );
+  }
+}
+
+// ── Mobile layout (stacked, 6.6) ──────────────────────────────────────────────
+
+class _MobileLayout extends StatefulWidget {
+  const _MobileLayout({required this.left, required this.right});
+
+  final Widget left;
+  final Widget right;
+
+  @override
+  State<_MobileLayout> createState() => _MobileLayoutState();
+}
+
+class _MobileLayoutState extends State<_MobileLayout> {
+  bool _editorCollapsed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        // Editor pane (collapsible)
+        AnimatedSize(
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeInOut,
+          child: SizedBox(
+            height: _editorCollapsed ? 0 : 300,
+            child: widget.left,
+          ),
+        ),
+        // Collapse/expand tab
+        GestureDetector(
+          onTap: () => setState(() => _editorCollapsed = !_editorCollapsed),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 12),
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  _editorCollapsed
+                      ? Icons.keyboard_arrow_down
+                      : Icons.keyboard_arrow_up,
+                  size: 16,
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  _editorCollapsed ? 'Show editor' : 'Hide editor',
+                  style: Theme.of(context).textTheme.labelSmall,
+                ),
+              ],
+            ),
+          ),
+        ),
+        // Form pane
+        Expanded(child: widget.right),
+      ],
+    );
+  }
+}
+
+// ── Mobile banner (6.6) ───────────────────────────────────────────────────────
+
+class _MobileBanner extends StatefulWidget {
+  const _MobileBanner({required this.onDismiss});
+
+  final VoidCallback onDismiss;
+
+  @override
+  State<_MobileBanner> createState() => _MobileBannerState();
+}
+
+class _MobileBannerState extends State<_MobileBanner> {
+  bool _dismissed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    if (_dismissed) return const SizedBox.shrink();
+    return MaterialBanner(
+      content: const Text('Best viewed on desktop'),
+      actions: [
+        TextButton(
+          onPressed: () {
+            setState(() => _dismissed = true);
+            widget.onDismiss();
+          },
+          child: const Text('Got it'),
+        ),
+      ],
     );
   }
 }

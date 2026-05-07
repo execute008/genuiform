@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:genuiform/genuiform.dart';
 
+import 'src/llm/workbench_mock_llm_client.dart';
 import 'src/shell/api_key_panel.dart';
 import 'src/shell/app_shell.dart';
 import 'src/shell/theme.dart';
@@ -36,6 +37,10 @@ class _WorkbenchRootState extends State<_WorkbenchRoot> {
   static const _envLocation =
       String.fromEnvironment('VERTEX_LOCATION', defaultValue: 'europe-west1');
 
+  /// When true, bypass all credential checks and use the local mock client.
+  /// Enable with `--dart-define=USE_MOCK=true`.
+  static const _useMock = bool.fromEnvironment('USE_MOCK');
+
   static const _model = 'gemini-2.5-flash';
 
   late final ValueNotifier<String> _apiKey;
@@ -55,14 +60,26 @@ class _WorkbenchRootState extends State<_WorkbenchRoot> {
     super.dispose();
   }
 
-  LlmClient _buildClient() => VertexDirectClient(
-        apiKey: _apiKey.value,
-        projectId: _projectId.value,
-        location: _envLocation,
-      );
+  LlmClient _buildClient() {
+    if (_useMock) return WorkbenchMockLlmClient();
+    return VertexDirectClient(
+      apiKey: _apiKey.value,
+      projectId: _projectId.value,
+      location: _envLocation,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
+    // Mock mode: skip credential gate entirely.
+    if (_useMock) {
+      return AppShell(
+        client: _buildClient(),
+        model: _model,
+        showMockBadge: true,
+      );
+    }
+
     // If compile-time defines are present, go straight to the shell.
     if (_envApiKey.isNotEmpty && _envProjectId.isNotEmpty) {
       return AppShell(client: _buildClient(), model: _model);
