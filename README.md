@@ -35,6 +35,23 @@ Static multi-step forms have three failure modes:
 
 ---
 
+## 1.5 Relation to A2UI
+
+Google's [A2UI protocol](https://a2ui.org) (and the [`flutter/genui`](https://pub.dev/packages/genui) SDK that implements it) lets an AI agent emit a UI structure each turn — components, data bindings, layout — and have the client render it. **A2UI is a UI canvas for agents.**
+
+`genuiform` is a layer above that. Where A2UI asks *"what should the UI look like this turn?"*, genuiform asks *"what should we ask next, given an invariant of what may ever be collected and where the form may ever land?"*. The four primitives below — `Contract`, `Constraint`, `Posture`, `Outcome` — are the runtime invariants that survive any per-step UI freedom the LLM exercises.
+
+| | A2UI / `flutter/genui` | `genuiform` |
+|---|---|---|
+| Who designs the UI | the agent (per turn) | the developer (once, via the four primitives) |
+| Per-turn payload | UI components + data bindings | a typed `QuizStepSpec` |
+| Runtime guarantees | none — the agent draws what it wants | `Contract` / `Constraint` / `Posture` / `Outcome` are hard |
+| Use when | you want generative UIs everywhere | you want generative UIs *bounded* by a typed schema, hard never-collect rules, and a closed set of allowed completions |
+
+The two compose well. The hackathon workbench can render terminal outcome screens via `flutter/genui` (see `A2UI_AGENDA.md` for status); the form-collection loop itself stays inside genuiform's typed primitives.
+
+---
+
 ## 2. The four primitives
 
 The library has exactly four primitives. Each answers a different question. They compose; they don't overlap.

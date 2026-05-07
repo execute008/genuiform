@@ -506,6 +506,22 @@ class _AboutDialog extends StatelessWidget {
                 'watching over your shoulder.',
               ),
               SizedBox(height: 16),
+              Text(
+                'Where this sits next to A2UI',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              SizedBox(height: 8),
+              Text(
+                "Google's A2UI protocol (a2ui.org) and the flutter/genui SDK "
+                'let an agent draw a UI per turn. genuiform is a layer above '
+                "that: where A2UI asks \"what should the UI look like this "
+                'turn?", genuiform asks "what should we ask next, given hard '
+                'invariants on what may ever be collected and where the form '
+                'may land?". The two compose — the workbench can render '
+                'outcome screens via flutter/genui while the form-collection '
+                "loop stays inside genuiform's typed primitives.",
+              ),
+              SizedBox(height: 16),
               Divider(),
               SizedBox(height: 8),
               Text(
