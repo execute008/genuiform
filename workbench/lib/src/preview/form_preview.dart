@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:genuiform/genuiform.dart';
 
+import '../llm/a2ui_outcome_emitter.dart';
+import '../llm/workbench_mock_llm_client.dart';
 import '../registry/handoff_registry.dart';
+import 'a2ui_outcome_loader.dart';
 import 'a2ui_outcome_renderer.dart';
 import 'debug_strip.dart';
 
@@ -32,6 +35,7 @@ class FormPreview extends StatefulWidget {
     required this.model,
     this.handoffMap = const {},
     this.onRestartRequested,
+    this.emitter,
     super.key,
   });
 
@@ -61,6 +65,17 @@ class FormPreview extends StatefulWidget {
   /// The shell bumps the form key, which re-keys this widget cleanly.
   final VoidCallback? onRestartRequested;
 
+  /// The A2UI outcome emitter constructed once per session by [AppShell].
+  ///
+  /// When [_kUseA2uiHandoff] is true AND this is non-null AND [client] is NOT
+  /// a [WorkbenchMockLlmClient], [_showHandoffToast] will call the emitter to
+  /// stream a live A2UI tree into [A2uiOutcomeRenderer].
+  ///
+  /// Gating decision ownership: [FormPreview] decides whether to use the emitter
+  /// (not [AppShell]) because only [FormPreview] has access to both [client]
+  /// (for mock detection) and the build-time [_kUseA2uiHandoff] flag.
+  final A2uiOutcomeEmitter? emitter;
+
   @override
   State<FormPreview> createState() => _FormPreviewState();
 }
@@ -75,7 +90,15 @@ class _FormPreviewState extends State<FormPreview>
 
   /// When set (only with [_kUseA2uiHandoff] true), the A2UI outcome renderer
   /// replaces the form pane after `onComplete` fires.
-  ({String outcomeId, SimulatedHandoff? handoff})? _activeA2uiHandoff;
+  ///
+  /// [a2uiStream] is non-null when the live emit path is active (real client +
+  /// emitter present). It is null when the v1 fallback is used (mock client or
+  /// no emitter) — [A2uiOutcomeRenderer] handles the null case automatically.
+  ({
+    String outcomeId,
+    SimulatedHandoff? handoff,
+    Stream<String>? a2uiStream,
+  })? _activeA2uiHandoff;
 
   /// Drives the fade-in when the form first appears (triggered by re-keying).
   late final AnimationController _fadeController;
@@ -111,8 +134,37 @@ class _FormPreviewState extends State<FormPreview>
 
     // PoC option C — replace the form pane with the A2UI-rendered outcome.
     if (_kUseA2uiHandoff) {
+      // Determine whether to use the live emit path or the v1 fallback.
+      //
+      // Gating rules (all must be true for the live path):
+      //   1. _kUseA2uiHandoff is true (compile-time flag, already true here).
+      //   2. widget.emitter is non-null (AppShell constructed one).
+      //   3. The client is NOT a WorkbenchMockLlmClient — the mock speaks
+      //      scripted form JSON, not A2UI v0.9.
+      //
+      // The gating decision lives here rather than in AppShell because FormPreview
+      // is the site that has both client type visibility and the flag check.
+      final bool isMock = widget.client is WorkbenchMockLlmClient;
+      Stream<String>? a2uiStream;
+
+      if (widget.emitter != null && !isMock) {
+        // Live path: build the loader and request a stream.
+        final loader = A2uiOutcomeLoader(emitter: widget.emitter!);
+        a2uiStream = loader.load(
+          outcomeId: outcomeId,
+          handoff: handoff,
+          result: result,
+        );
+      }
+      // If isMock or emitter is null, a2uiStream stays null → renderer uses v1
+      // fallback path automatically (spec §4.5 "v1 hand-crafted fallback").
+
       setState(() {
-        _activeA2uiHandoff = (outcomeId: outcomeId, handoff: handoff);
+        _activeA2uiHandoff = (
+          outcomeId: outcomeId,
+          handoff: handoff,
+          a2uiStream: a2uiStream,
+        );
       });
       return;
     }
@@ -153,6 +205,7 @@ class _FormPreviewState extends State<FormPreview>
           setState(() => _activeA2uiHandoff = null);
           widget.onRestartRequested?.call();
         },
+        a2uiMessageStream: _activeA2uiHandoff!.a2uiStream,
       );
     }
 

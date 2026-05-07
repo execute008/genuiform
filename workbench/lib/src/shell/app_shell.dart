@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:genuiform/genuiform.dart';
 
 import '../editor/code_editor.dart';
+import '../llm/a2ui_outcome_emitter.dart';
 import '../parser/parse_dsl.dart';
 import '../persistence/url_state.dart';
 import '../preview/form_preview.dart';
@@ -64,6 +65,14 @@ class _AppShellState extends State<AppShell> {
   /// Last DSL value that was synced to the URL hash (avoids redundant writes).
   String _lastSyncedDsl = '';
 
+  /// Emitter constructed once per session, shared across form completions.
+  ///
+  /// Always constructed (even when the client is a mock), because the gating
+  /// decision — whether to actually call through to the emitter — lives in
+  /// [FormPreview], which has visibility into both the client type and the
+  /// compile-time [_kUseA2uiHandoff] flag.
+  late final A2uiOutcomeEmitter _a2uiEmitter;
+
   @override
   void initState() {
     super.initState();
@@ -87,6 +96,13 @@ class _AppShellState extends State<AppShell> {
     if (_parseResult.isClean) {
       _syncUrl();
     }
+
+    // Construct the A2UI emitter once per session.
+    // AppShell constructs always; FormPreview gates on client type + flag.
+    _a2uiEmitter = A2uiOutcomeEmitter(
+      client: widget.client,
+      model: widget.model,
+    );
   }
 
   @override
@@ -183,6 +199,7 @@ class _AppShellState extends State<AppShell> {
                 model: widget.model,
                 handoffMap: handoffMap,
                 onRestartRequested: _runOrReset,
+                emitter: _a2uiEmitter,
               )
             : const _NoParsedFormPlaceholder();
 
