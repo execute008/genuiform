@@ -1,0 +1,45 @@
+name: Deploy Workbench
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # TODO: enable Pages and add actions/deploy-pages step
+  # pages: write
+  # id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Install dependencies
+        working-directory: workbench
+        run: flutter pub get
+
+      - name: Build workbench for web
+        working-directory: workbench
+        run: |
+          flutter build web --release \
+            --dart-define=VERTEX_API_KEY=${{ secrets.VERTEX_API_KEY }} \
+            --dart-define=VERTEX_PROJECT_ID=${{ secrets.VERTEX_PROJECT_ID }}
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: workbench-web
+          path: workbench/build/web/
+          retention-days: 30
+
+      # TODO: enable Pages and add actions/deploy-pages step
+      # - name: Deploy to GitHub Pages
+      #   uses: actions/deploy-pages@v4
