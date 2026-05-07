@@ -44,7 +44,8 @@ dependencies:
 
   # A2UI integration PoC — render generative outcome screens via Google's
   # flutter/genui SDK (option C in A2UI_AGENDA.md).
-  genui: ^0.9.0
+  # Pinned exactly (no caret) for the May 9 hackathon — see A2UI_C_V2_SPEC.md §5.5.
+  genui: 0.9.0
 
 dev_dependencies:
   flutter_test:
