@@ -1,0 +1,192 @@
+import 'package:genuiform/genuiform.dart';
+
+import '../registry/handoff_registry.dart';
+import 'ast.dart';
+import 'parse_error.dart';
+
+/// The result of translating a [FormNode] AST into real genuiform objects.
+///
+/// The four primitives are exposed individually so the workbench can wrap
+/// them into a [GenuiForm] at render time with the real [LlmClient]. They
+/// are non-null on success; all four are null when the AST cannot be
+/// translated at all (currently impossible — the builder always produces
+/// values, soft errors land in [errors] instead).
+class BuildResult {
+  const BuildResult({
+    this.contract,
+    this.constraints,
+    this.posture,
+    this.outcomes,
+    required this.errors,
+  });
+
+  final Contract? contract;
+  final List<Constraint>? constraints;
+  final Posture? posture;
+  final OutcomeNode? outcomes;
+
+  /// Soft errors encountered during building (e.g. unknown handoff key).
+  /// The four primitives may still be present; the form simply has a
+  /// `null` handoff for the offending node.
+  final List<ParseError> errors;
+
+  bool get hasErrors => errors.isNotEmpty;
+}
+
+/// Translates a [FormNode] AST into real genuiform types.
+///
+/// Errors are accumulated rather than thrown, so the builder produces as much
+/// as possible even when some references cannot be resolved (e.g. unknown
+/// handoff registry keys).
+class DslBuilder {
+  final List<ParseError> _errors = [];
+
+  BuildResult build(FormNode ast) {
+    _errors.clear();
+
+    final contract = _buildContract(ast.contract);
+    final constraints = _buildConstraints(ast.constraints);
+    final posture = _buildPosture(ast.posture);
+    final outcomes = _buildOutcomeNode(ast.outcomes);
+
+    return BuildResult(
+      contract: contract,
+      constraints: constraints,
+      posture: posture,
+      outcomes: outcomes,
+      errors: List.unmodifiable(_errors),
+    );
+  }
+
+  Contract _buildContract(ContractNode node) {
+    final fields = <String, FieldSpec>{};
+    for (final entry in node.fields.entries) {
+      fields[entry.key] = _buildFieldSpec(entry.value);
+    }
+    return Contract(fields: fields);
+  }
+
+  FieldSpec _buildFieldSpec(FieldSpecNode node) {
+    return FieldSpec(
+      type: node.type,
+      required: node.required,
+      description: node.description,
+      enumValues: node.enumValues,
+      range: node.range != null ? _buildNumRange(node.range!) : null,
+      minLength: node.minLength,
+      maxLength: node.maxLength,
+    );
+  }
+
+  NumRange _buildNumRange(NumRangeNode node) {
+    return NumRange(min: node.min, max: node.max);
+  }
+
+  List<Constraint> _buildConstraints(List<ConstraintNode> nodes) {
+    return nodes.map(_buildConstraint).toList();
+  }
+
+  Constraint _buildConstraint(ConstraintNode node) {
+    return switch (node) {
+      NeverCollectNode() => NeverCollect(fieldOrTopic: node.fieldOrTopic),
+      NeverSkipNode() => NeverSkip(fieldIds: node.fieldIds),
+      MaxStepsNode() => MaxSteps(value: node.value),
+      MinStepsNode() => MinSteps(value: node.value),
+      WhitelistChoicesNode() => WhitelistChoices(
+          fieldId: node.fieldId,
+          allowed: node.allowed,
+        ),
+      EscalateIfNode() => EscalateIf(
+          trigger: node.trigger,
+          handler: null,
+        ),
+      StopIfNode() => StopIf(trigger: node.trigger),
+      RequireConsentNode() => RequireConsent(topic: node.topic),
+    };
+  }
+
+  Posture _buildPosture(PostureNode node) {
+    return switch (node) {
+      PosturePresetNode() => _buildPosturePreset(node),
+      PostureLiteralNode() => Posture(
+          persistence: node.persistence,
+          exploration: node.exploration,
+          pacing: node.pacing,
+          skipTolerance: node.skipTolerance,
+          voice: node.voice,
+        ),
+    };
+  }
+
+  Posture _buildPosturePreset(PosturePresetNode node) {
+    return switch (node.preset) {
+      'salesDiscovery' => Posture.salesDiscovery(),
+      'supportiveOnboarding' => Posture.supportiveOnboarding(),
+      'clinicalIntake' => Posture.clinicalIntake(),
+      _ => throw ParseError(
+          line: node.line,
+          column: node.column,
+          message: "Unknown Posture preset '${node.preset}'",
+          hint: 'Valid presets: salesDiscovery, supportiveOnboarding, clinicalIntake',
+        ),
+    };
+  }
+
+  OutcomeNode _buildOutcomeNode(OutcomeAstNode node) {
+    return switch (node) {
+      LayerAstNode() => _buildLayer(node),
+      BranchAstNode() => _buildBranch(node),
+      OutcomeTerminalNode() => _buildOutcomeTerminal(node),
+    };
+  }
+
+  Layer _buildLayer(LayerAstNode node) {
+    return Layer(
+      id: node.id,
+      contractDelta: _buildContract(node.contractDelta),
+      handoff: node.handoff != null ? _resolveHandoff(node.handoff!) : null,
+      next: node.next != null ? _buildOutcomeNode(node.next!) : null,
+    );
+  }
+
+  Branch _buildBranch(BranchAstNode node) {
+    return Branch(
+      id: node.id,
+      options: node.options.map(_buildBranchOption).toList(),
+    );
+  }
+
+  BranchOption _buildBranchOption(BranchOptionAstNode node) {
+    return BranchOption(
+      id: node.id,
+      criterion: node.criterion,
+      contractDelta:
+          node.contractDelta != null ? _buildContract(node.contractDelta!) : null,
+      child: _buildOutcomeNode(node.child),
+    );
+  }
+
+  Outcome _buildOutcomeTerminal(OutcomeTerminalNode node) {
+    return Outcome(
+      id: node.id,
+      contractDelta: _buildContract(node.contractDelta),
+      handoff: node.handoff != null ? _resolveHandoff(node.handoff!) : null,
+    );
+  }
+
+  Handoff? _resolveHandoff(HandoffStubNode node) {
+    final entry = kHandoffRegistry[node.registryKey];
+    if (entry == null) {
+      _errors.add(ParseError(
+        line: node.line,
+        column: node.column,
+        message: "Unknown handoff '${node.registryKey}'. "
+            "Available: ${kHandoffRegistry.keys.join(', ')}",
+      ));
+      return null;
+    }
+    return (_) {
+      // Phase 6 wires the toast: show '${entry.label}' with icon '${entry.icon}'.
+    };
+  }
+}
