@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:genuiform/genuiform.dart';
 
+import '../editor/code_editor.dart';
 import '../preview/form_preview.dart';
 import '../scenarios/lead_qualification_dsl.dart';
 import 'split_view.dart';
@@ -117,24 +118,14 @@ class _LeftPane extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             color: Theme.of(context).colorScheme.surfaceContainerHighest,
             child: Text(
-              'DSL editor  (read-only — Phase 1)',
+              'DSL editor  (read-only — Phase 2)',
               style: Theme.of(context).textTheme.labelSmall?.copyWith(
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
             ),
           ),
           Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
-              child: SelectableText(
-                dsl,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      fontFamily: 'monospace',
-                      color: Theme.of(context).colorScheme.onSurface,
-                      height: 1.5,
-                    ),
-              ),
-            ),
+            child: CodeEditor(code: dsl, readOnly: true),
           ),
         ],
       ),
