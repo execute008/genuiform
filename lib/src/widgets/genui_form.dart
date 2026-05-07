@@ -61,6 +61,7 @@ class GenuiForm extends StatefulWidget {
     this.onComplete,
     this.onEscalation,
     this.onError,
+    this.onControllerCreated,
     super.key,
   });
 
@@ -94,6 +95,14 @@ class GenuiForm extends StatefulWidget {
   /// Called when a [StreamError] event fires.
   final void Function(Object)? onError;
 
+  /// Called once after the internal [FormController] is created.
+  ///
+  /// Lets consumers subscribe to [FormController.sessions] / [FormController.events]
+  /// from outside the widget (e.g. a debug strip rendered next to the form).
+  /// The controller's lifecycle is owned by [GenuiForm] — do not call
+  /// [FormController.dispose] on it.
+  final void Function(FormController controller)? onControllerCreated;
+
   @override
   State<GenuiForm> createState() => _GenuiFormState();
 }
@@ -122,6 +131,7 @@ class _GenuiFormState extends State<GenuiForm> {
       strategy: widget.strategy ?? GenerativeStrategy(),
     );
     _controller.events.listen(_handleEvent);
+    widget.onControllerCreated?.call(_controller);
     _controller.start();
   }
 
