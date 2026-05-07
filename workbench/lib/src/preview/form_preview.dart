@@ -1,21 +1,41 @@
 import 'package:flutter/material.dart';
 import 'package:genuiform/genuiform.dart';
 
-import '../scenarios/lead_qualification_form.dart';
 import 'debug_strip.dart';
 
 /// Right-pane preview widget.
 ///
-/// Renders the hardcoded [leadQualificationForm] as a [GenuiForm] and a
-/// [DebugStrip] below it. The form's internal [FormController] is hoisted
-/// out via the new `onControllerCreated` callback so the debug strip can
-/// subscribe to live session updates without us re-implementing the form.
+/// Renders a [GenuiForm] built from the four parsed primitives ([contract],
+/// [constraints], [posture], [outcomes]) plus [client] and [model].
+///
+/// The form's internal [FormController] is hoisted out via
+/// [GenuiForm.onControllerCreated] so the [DebugStrip] below can subscribe to
+/// live session updates.
+///
+/// Re-keying this widget (via [ValueKey(_formKey)] in the shell) resets the
+/// [FormController] cleanly.
 class FormPreview extends StatefulWidget {
   const FormPreview({
+    required this.contract,
+    required this.constraints,
+    required this.posture,
+    required this.outcomes,
     required this.client,
     required this.model,
     super.key,
   });
+
+  /// Parsed contract — what fields the LLM may collect.
+  final Contract contract;
+
+  /// Parsed constraints — rules the LLM must obey.
+  final List<Constraint> constraints;
+
+  /// Parsed posture — tone and pacing settings.
+  final Posture posture;
+
+  /// Parsed outcome tree root.
+  final OutcomeNode outcomes;
 
   /// The LLM transport forwarded to the inner form.
   final LlmClient client;
@@ -37,16 +57,32 @@ class _FormPreviewState extends State<FormPreview> {
     super.dispose();
   }
 
+  void _showSnackbar(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Expanded(
-          child: leadQualificationForm(
+          child: GenuiForm(
+            contract: widget.contract,
+            constraints: widget.constraints,
+            posture: widget.posture,
+            outcomes: widget.outcomes,
             client: widget.client,
             model: widget.model,
             onControllerCreated: (c) => _controller.value = c,
+            onEscalation: (rule) {
+              _showSnackbar('Escalated: ${rule.trigger}');
+            },
+            onError: (err) {
+              _showSnackbar('Form error: $err');
+            },
           ),
         ),
         ValueListenableBuilder<FormController?>(

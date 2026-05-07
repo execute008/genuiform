@@ -3,18 +3,45 @@ import 'package:re_editor/re_editor.dart' as re_editor;
 import 'package:re_highlight/languages/dart.dart';
 import 'package:re_highlight/styles/atom-one-dark.dart';
 
-/// A syntax-highlighted, read-only (Phase 2) code editor widget.
+/// A parse-error annotation for a specific source line.
+///
+/// Used by [CodeEditor] to render a red error indicator in the gutter for
+/// any line in [errors]. Phase 4 does not require sub-character precision —
+/// a gutter marker per-line is sufficient.
+class EditorErrorMark {
+  final int line; // 1-based source line
+  final int column; // 1-based (best-effort)
+  final String message;
+  final String? hint;
+
+  const EditorErrorMark({
+    required this.line,
+    required this.column,
+    required this.message,
+    this.hint,
+  });
+}
+
+/// A syntax-highlighted, optionally-editable code editor widget.
 ///
 /// Renders [code] with Dart syntax highlighting and line numbers in a dark
 /// theme that integrates with the workbench's Material 3 dark palette.
 ///
-/// [readOnly] defaults to `true` — Phase 4 will pass `false` to enable
-/// live editing. The editor remains selectable and copyable regardless of
-/// [readOnly].
+/// [readOnly] defaults to `true` — Phase 2 behaviour. Pass `false` to enable
+/// live editing.
+///
+/// [onChanged] is called with the full text after every content change.
+/// Only meaningful when [readOnly] is false.
+///
+/// [errors] is a list of [EditorErrorMark] objects. Lines in the error set
+/// get a small red indicator prepended in the gutter (via a Tooltip showing
+/// the error message).
 class CodeEditor extends StatefulWidget {
   const CodeEditor({
     required this.code,
     this.readOnly = true,
+    this.onChanged,
+    this.errors = const [],
     super.key,
   });
 
@@ -22,8 +49,16 @@ class CodeEditor extends StatefulWidget {
   final String code;
 
   /// When true the user cannot modify the content; they can still select
-  /// and copy text. Phase 2 always passes true.
+  /// and copy text. Defaults to true.
   final bool readOnly;
+
+  /// Called with the new full text on every content change.
+  /// Only fired when [readOnly] is false.
+  final ValueChanged<String>? onChanged;
+
+  /// Lines that should show an error indicator in the gutter.
+  /// Lines are 1-based to match [ParseError.line].
+  final List<EditorErrorMark> errors;
 
   @override
   State<CodeEditor> createState() => _CodeEditorState();
@@ -32,6 +67,10 @@ class CodeEditor extends StatefulWidget {
 class _CodeEditorState extends State<CodeEditor> {
   late re_editor.CodeLineEditingController _controller;
 
+  // Single stable listener reference — required so we can remove it in dispose
+  // without leaking on hot-reload.
+  late final VoidCallback _editorListener;
+
   // Gutter background: slightly lighter than the editor body so it reads
   // as a distinct lane without being jarring.
   static const Color _gutterBg = Color(0xff21252e); // ~3% lighter than #1e2127
@@ -39,29 +78,50 @@ class _CodeEditorState extends State<CodeEditor> {
   static const Color _editorBg = Color(0xff1e2127); // slightly darker than atom-one-dark root
   static const Color _selectionColor = Color(0x553e4451); // atom-one-dark selection
   static const Color _gutterDivider = Color(0xff3e4451); // subtle divider
+  static const Color _errorDot = Color(0xffff5555); // bright red for error markers
 
   @override
   void initState() {
     super.initState();
     _controller = re_editor.CodeLineEditingController.fromText(widget.code);
+    _editorListener = () {
+      widget.onChanged?.call(_controller.text);
+    };
+    _controller.addListener(_editorListener);
   }
 
   @override
   void didUpdateWidget(CodeEditor old) {
     super.didUpdateWidget(old);
-    if (old.code != widget.code) {
+    // Guard against resetting the cursor when the parent echoes back the same
+    // text the user just typed (e.g. after a debounce round-trip).
+    if (old.code != widget.code && _controller.text != widget.code) {
       _controller.text = widget.code;
     }
   }
 
   @override
   void dispose() {
+    _controller.removeListener(_editorListener);
     _controller.dispose();
     super.dispose();
   }
 
+  /// Build the set of error line numbers (1-based) for fast lookup.
+  Set<int> get _errorLines => {for (final e in widget.errors) e.line};
+
+  /// Find the [EditorErrorMark] for a given 1-based line, or null.
+  EditorErrorMark? _markForLine(int line) {
+    for (final e in widget.errors) {
+      if (e.line == line) return e;
+    }
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final errorLines = _errorLines;
+
     return re_editor.CodeEditor(
       controller: _controller,
       readOnly: widget.readOnly,
@@ -95,15 +155,13 @@ class _CodeEditorState extends State<CodeEditor> {
           children: [
             Container(
               color: _gutterBg,
-              child: re_editor.DefaultCodeLineNumber(
-                controller: editingController,
+              child: _ErrorGutter(
+                editingController: editingController,
                 notifier: notifier,
-                textStyle: const TextStyle(
-                  fontFamily: 'monospace',
-                  fontSize: 13,
-                  height: 1.5,
-                  color: _gutterFg,
-                ),
+                errorLines: errorLines,
+                markForLine: _markForLine,
+                gutterFg: _gutterFg,
+                errorDot: _errorDot,
               ),
             ),
             Container(width: 1, color: _gutterDivider),
@@ -111,5 +169,131 @@ class _CodeEditorState extends State<CodeEditor> {
         );
       },
     );
+  }
+}
+
+// ── Error-aware gutter ─────────────────────────────────────────────────────────
+
+/// A custom gutter widget that renders line numbers AND a small red dot (with
+/// Tooltip) on any line that has a parse error.
+///
+/// Implementation choice: we use [ValueListenableBuilder] on the
+/// [re_editor.CodeIndicatorValueNotifier] to know which lines are currently
+/// visible (the notifier gives us a list of [CodeLineRenderParagraph], each
+/// with its 0-based index and vertical offset). We map each paragraph's index
+/// to a 1-based source line via [editingController.index2lineIndex], then check
+/// against [errorLines].
+///
+/// We render a fixed-width Stack: the [re_editor.DefaultCodeLineNumber] paints
+/// the numbers, and we overlay a small coloured dot + Tooltip for error lines.
+class _ErrorGutter extends StatelessWidget {
+  const _ErrorGutter({
+    required this.editingController,
+    required this.notifier,
+    required this.errorLines,
+    required this.markForLine,
+    required this.gutterFg,
+    required this.errorDot,
+  });
+
+  final re_editor.CodeLineEditingController editingController;
+  final re_editor.CodeIndicatorValueNotifier notifier;
+  final Set<int> errorLines;
+  final EditorErrorMark? Function(int line) markForLine;
+  final Color gutterFg;
+  final Color errorDot;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<re_editor.CodeIndicatorValue?>(
+      valueListenable: notifier,
+      builder: (context, value, _) {
+        return Stack(
+          children: [
+            // Base: standard line numbers
+            re_editor.DefaultCodeLineNumber(
+              controller: editingController,
+              notifier: notifier,
+              textStyle: TextStyle(
+                fontFamily: 'monospace',
+                fontSize: 13,
+                height: 1.5,
+                color: gutterFg,
+              ),
+            ),
+            // Overlay: error dots on error lines
+            if (value != null && errorLines.isNotEmpty)
+              Positioned.fill(
+                child: _ErrorDotOverlay(
+                  paragraphs: value.paragraphs,
+                  editingController: editingController,
+                  errorLines: errorLines,
+                  markForLine: markForLine,
+                  errorDot: errorDot,
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// Renders small coloured dots with Tooltips at the vertical position of each
+/// error line among the currently visible paragraphs.
+class _ErrorDotOverlay extends StatelessWidget {
+  const _ErrorDotOverlay({
+    required this.paragraphs,
+    required this.editingController,
+    required this.errorLines,
+    required this.markForLine,
+    required this.errorDot,
+  });
+
+  final List<re_editor.CodeLineRenderParagraph> paragraphs;
+  final re_editor.CodeLineEditingController editingController;
+  final Set<int> errorLines;
+  final EditorErrorMark? Function(int line) markForLine;
+  final Color errorDot;
+
+  @override
+  Widget build(BuildContext context) {
+    final List<Widget> dots = [];
+    for (final para in paragraphs) {
+      // Convert 0-based paragraph index to 1-based source line.
+      final sourceLine = editingController.index2lineIndex(para.index) + 1;
+      if (!errorLines.contains(sourceLine)) continue;
+      final mark = markForLine(sourceLine);
+      final tooltipMsg = mark == null
+          ? 'Error on line $sourceLine'
+          : (mark.hint != null
+              ? '${mark.message}\n${mark.hint}'
+              : mark.message);
+
+      dots.add(
+        Positioned(
+          top: para.top,
+          left: 0,
+          child: Tooltip(
+            message: tooltipMsg,
+            child: SizedBox(
+              width: 8,
+              height: para.preferredLineHeight,
+              child: Center(
+                child: Container(
+                  width: 6,
+                  height: 6,
+                  decoration: BoxDecoration(
+                    color: errorDot,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+    return Stack(children: dots);
   }
 }
