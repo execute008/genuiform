@@ -44,10 +44,15 @@ class ParseResult {
   bool get hasForm =>
       contract != null && constraints != null && posture != null && outcomes != null;
 
-  /// True when there are any errors at all (fatal or soft).
+  /// True when there are any errors at all — fatal parse failures *or* soft
+  /// builder errors (e.g. unknown handoff key) that still produce a partial
+  /// form.
   bool get hasErrors => errors.isNotEmpty;
 
-  /// True when no errors were encountered and the form is fully resolved.
+  /// True only when zero errors of any kind were emitted and the four
+  /// primitives are all present. Soft errors (unknown handoff key,
+  /// unresolved registry entries) flip this to false even though [hasForm]
+  /// would still be true.
   bool get isClean => errors.isEmpty && hasForm;
 }
 

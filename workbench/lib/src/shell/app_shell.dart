@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:genuiform/genuiform.dart';
 
 import '../editor/code_editor.dart';
@@ -164,49 +165,30 @@ class _AppShellState extends State<AppShell> {
       builder: (context, constraints) {
         final isMobile = constraints.maxWidth < 900;
 
-        Widget shellBody = SplitView(
-          left: _LeftPane(
-            dsl: _dsl,
-            parseResult: _parseResult,
-            onChanged: _onDslChanged,
-          ),
-          right: hasForm
-              ? FormPreview(
-                  key: ValueKey(_formKey),
-                  contract: _parseResult.contract!,
-                  constraints: _parseResult.constraints!,
-                  posture: _parseResult.posture!,
-                  outcomes: _parseResult.outcomes!,
-                  client: widget.client,
-                  model: widget.model,
-                  handoffMap: handoffMap,
-                  onRestartRequested: _runOrReset,
-                )
-              : const _NoParsedFormPlaceholder(),
+        // Build the two panes once, then hand them to either layout.
+        final leftPane = _LeftPane(
+          dsl: _dsl,
+          parseResult: _parseResult,
+          onChanged: _onDslChanged,
         );
 
-        if (isMobile) {
-          shellBody = _MobileLayout(
-            left: _LeftPane(
-              dsl: _dsl,
-              parseResult: _parseResult,
-              onChanged: _onDslChanged,
-            ),
-            right: hasForm
-                ? FormPreview(
-                    key: ValueKey(_formKey),
-                    contract: _parseResult.contract!,
-                    constraints: _parseResult.constraints!,
-                    posture: _parseResult.posture!,
-                    outcomes: _parseResult.outcomes!,
-                    client: widget.client,
-                    model: widget.model,
-                    handoffMap: handoffMap,
-                    onRestartRequested: _runOrReset,
-                  )
-                : const _NoParsedFormPlaceholder(),
-          );
-        }
+        final Widget rightPane = hasForm
+            ? FormPreview(
+                key: ValueKey(_formKey),
+                contract: _parseResult.contract!,
+                constraints: _parseResult.constraints!,
+                posture: _parseResult.posture!,
+                outcomes: _parseResult.outcomes!,
+                client: widget.client,
+                model: widget.model,
+                handoffMap: handoffMap,
+                onRestartRequested: _runOrReset,
+              )
+            : const _NoParsedFormPlaceholder();
+
+        final Widget shellBody = isMobile
+            ? _MobileLayout(left: leftPane, right: rightPane)
+            : SplitView(left: leftPane, right: rightPane);
 
         return Scaffold(
           appBar: AppBar(
@@ -259,9 +241,12 @@ class _AppShellState extends State<AppShell> {
               const SizedBox(width: 12),
 
               // ── Run button ────────────────────────────────────────────────
-              FilledButton(
-                onPressed: _runOrReset,
-                child: const Text('Run'),
+              Tooltip(
+                message: '⌘ Enter / Ctrl Enter',
+                child: FilledButton(
+                  onPressed: _runOrReset,
+                  child: const Text('Run'),
+                ),
               ),
               const SizedBox(width: 8),
 
@@ -281,14 +266,26 @@ class _AppShellState extends State<AppShell> {
               const SizedBox(width: 8),
             ],
           ),
-          body: isMobile
-              ? Column(
-                  children: [
-                    _MobileBanner(onDismiss: () => setState(() {})),
-                    Expanded(child: shellBody),
-                  ],
-                )
-              : shellBody,
+          body: CallbackShortcuts(
+            bindings: <ShortcutActivator, VoidCallback>{
+              // Cmd+Enter on macOS, Ctrl+Enter elsewhere.
+              const SingleActivator(LogicalKeyboardKey.enter, meta: true):
+                  _runOrReset,
+              const SingleActivator(LogicalKeyboardKey.enter, control: true):
+                  _runOrReset,
+            },
+            child: Focus(
+              autofocus: true,
+              child: isMobile
+                  ? Column(
+                      children: [
+                        _MobileBanner(onDismiss: () => setState(() {})),
+                        Expanded(child: shellBody),
+                      ],
+                    )
+                  : shellBody,
+            ),
+          ),
         );
       },
     );
