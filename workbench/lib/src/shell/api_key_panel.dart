@@ -52,6 +52,9 @@ class _ApiKeyPanelState extends State<ApiKeyPanel> {
   void _save() {
     final trimmed = _textController.text.trim();
     widget.notifier.value = trimmed;
+    // Clear the visible field once the value is committed so a later observer
+    // can't read the bearer token off the screen via `Cmd-A` + `Cmd-C`.
+    _textController.clear();
   }
 
   @override
@@ -73,6 +76,8 @@ class _ApiKeyPanelState extends State<ApiKeyPanel> {
                   child: TextField(
                     controller: _textController,
                     obscureText: true,
+                    autocorrect: false,
+                    enableSuggestions: false,
                     decoration: InputDecoration(
                       hintText: 'Paste your ${widget.label}',
                       isDense: true,
@@ -102,9 +107,3 @@ class _ApiKeyPanelState extends State<ApiKeyPanel> {
   }
 }
 
-/// Convenience getter that exposes the [ApiKeyPanel.label] so tests can query
-/// the widget without digging into the tree. Accessed via the widget's public
-/// field.
-extension ApiKeyPanelLabel on ApiKeyPanel {
-  String get labelText => label;
-}

@@ -1,17 +1,106 @@
 # genuiform_workbench
 
-A new Flutter project.
+Live code editor + form preview for the [genuiform](../) library. Built as the
+demo surface for the Generative UI Hackathon — judges sit at the laptop, edit
+the form definition on the left, and watch the form rebuild on the right.
 
-## Getting Started
+```
+┌──────────────────────────┬───────────────────────────┐
+│  // edit the DSL         │  What's your company?     │
+│  final form = GenuiForm( │  [ Acme Industries     ]  │
+│    contract: ...         │              [ Continue ] │
+│    constraints: [...],   │                           │
+│    posture: ...,         │  ─────────────────────    │
+│    outcomes: ...,        │  step 3 · strong · path   │
+│  );                      │                           │
+│  ✓ parsed cleanly        │                           │
+└──────────────────────────┴───────────────────────────┘
+```
 
-This project is a starting point for a Flutter application.
+The editor accepts a constrained Dart-shaped **DSL** (not real Dart — Flutter
+Web cannot compile Dart at runtime). The DSL parses into the four genuiform
+primitives (`Contract`, `List<Constraint>`, `Posture`, `OutcomeNode`) which the
+right pane wraps into a live `GenuiForm`. See `WORKBENCH_SPEC.md` §1 for why.
 
-A few resources to get you started if this is your first Flutter project:
+## Run it
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+Three `--dart-define` keys feed the Vertex transport:
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+```bash
+flutter run -d chrome \
+  --dart-define=VERTEX_API_KEY=<your-token> \
+  --dart-define=VERTEX_PROJECT_ID=<your-gcp-project> \
+  --dart-define=VERTEX_LOCATION=europe-west1
+```
+
+If any are missing, the workbench shows a paste panel as a fallback.
+
+For a stage-safe demo path that never calls Vertex:
+
+```bash
+flutter run -d chrome --dart-define=USE_MOCK=true
+```
+
+This swaps in a scripted mock LLM client that completes the
+`lead_qualification` scenario in four steps and routes to `book_call`. An
+amber `MOCK` chip stays pinned in the top bar so you always know which mode
+you're in.
+
+## What's in scope
+
+- **Live parse-and-rebuild** — 250 ms debounce, inline error indicators,
+  `parsed cleanly / N warnings / N errors` footer.
+- **Four bundled scenarios** picked from a top-bar dropdown, all four parse
+  via the same DSL grammar (`lead_qualification`, `gymgeist_onboarding`,
+  `newsletter_signup`, `medical_intake`).
+- **URL hash state** — `gzip + base64url` of the editor content, capped to
+  defend against gzip-bomb URLs. Paste a workbench URL into a fresh tab and
+  the editor restores. URL is only updated on clean parses, so bad code
+  never lands in the link.
+- **Handoff toasts + escalation card** — when the form completes the toast
+  shows the named handoff (`Book a call`, `Send proposal`, …) with a Material
+  icon. When `EscalateIf` fires the form pane swaps for an escalation card
+  with a Restart button.
+- **Mobile fallback** — under 900 px, the layout stacks editor-above-form
+  and shows a "best viewed on desktop" banner.
+
+## Build for production
+
+```bash
+flutter build web --release \
+  --dart-define=VERTEX_API_KEY=<token> \
+  --dart-define=VERTEX_PROJECT_ID=<project> \
+  --dart-define=VERTEX_LOCATION=europe-west1
+```
+
+The output lands in `build/web/`. The hosting target should serve over HTTPS
+and set `X-Frame-Options: DENY` (or rely on the `frame-ancestors 'none'` CSP
+we ship in `web/index.html`).
+
+## Tests
+
+```bash
+flutter test
+```
+
+77 tests across the lexer, parser, builder, four scenario round-trips, URL
+hash round-trip, and a top-level widget smoke. The genuiform library has its
+own 515-test suite — run from the repo root with `flutter test`.
+
+## Phases
+
+The build was structured in seven phases (see `WORKBENCH_SPEC.md` §5):
+
+| Phase | What landed |
+|---|---|
+| 0 | scaffold (`flutter create --platforms=web`) |
+| 1 | static split layout + hardcoded form |
+| 2 | read-only Dart code editor (`re_editor` + Atom One Dark) |
+| 3 | DSL parser, AST, builder, handoff registry |
+| 4 | live parse-and-rebuild with error indicators |
+| 5 | scenario presets + URL hash state |
+| 6 | demo polish (animations, toasts, escalation card, mock client, About modal) |
+
+A small additive change to the genuiform library — the `onControllerCreated`
+callback on `GenuiForm` — was needed so the workbench's debug strip can
+subscribe to live session updates without re-implementing the form internals.

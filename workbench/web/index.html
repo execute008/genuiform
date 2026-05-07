@@ -18,7 +18,13 @@
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
+  <meta name="description" content="genuiform workbench — live DSL editor and form preview powered by Vertex AI Gemini.">
+
+  <!-- Block iframe embedding (defends against clickjacking that could capture
+       a key pasted into the in-app credentials gate). The hosting target
+       should also set X-Frame-Options: DENY at the HTTP layer. -->
+  <meta http-equiv="Content-Security-Policy"
+        content="frame-ancestors 'none'">
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">

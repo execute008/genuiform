@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'parse_error.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -48,12 +50,7 @@ class Token {
   final int column;
 
   @override
-  String toString() => 'Token($kind, ${JSON.stringify(value)}, $line:$column)';
-}
-
-// Helper: wrap in a readable form without importing dart:convert.
-class JSON {
-  static String stringify(String s) => '"${s.replaceAll('"', '\\"')}"';
+  String toString() => 'Token($kind, ${jsonEncode(value)}, $line:$column)';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

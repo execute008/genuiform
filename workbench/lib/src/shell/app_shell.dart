@@ -152,6 +152,11 @@ class _AppShellState extends State<AppShell> {
     final currentScenario =
         kScenarios.firstWhere((s) => s.id == _currentScenarioId);
 
+    // The dropdown is anchored to the last-picked scenario, but the editor
+    // content may have drifted. Render a "(modified)" suffix on the closed
+    // dropdown when the DSL no longer matches any preset exactly.
+    final isModified = !kScenarios.any((s) => s.dsl == _dsl);
+
     // Build a side-table of outcomeId → SimulatedHandoff from the parsed DSL.
     final handoffMap = _parseResult.handoffMap ?? const {};
 
@@ -227,6 +232,17 @@ class _AppShellState extends State<AppShell> {
               DropdownButton<Scenario>(
                 value: currentScenario,
                 underline: const SizedBox.shrink(),
+                selectedItemBuilder: (context) => kScenarios
+                    .map(
+                      (s) => Center(
+                        child: Text(
+                          isModified && s.id == currentScenario.id
+                              ? '${s.name} (modified)'
+                              : s.name,
+                        ),
+                      ),
+                    )
+                    .toList(),
                 items: kScenarios
                     .map(
                       (s) => DropdownMenuItem<Scenario>(

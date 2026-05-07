@@ -1,9 +1,3 @@
-import 'package:genuiform/genuiform.dart';
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Simulated handoff
-// ─────────────────────────────────────────────────────────────────────────────
-
 /// A named, displayable representation of a handoff action.
 ///
 /// Used by the workbench instead of real Dart closures — since the DSL cannot
@@ -64,27 +58,3 @@ const Map<String, SimulatedHandoff> kHandoffRegistry = {
     icon: 'check',
   ),
 };
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Resolver
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Returns a real [Handoff] callback for the given registry [key].
-///
-/// The returned closure does nothing besides capture the [SimulatedHandoff]
-/// metadata — Phase 6 wires it to a workbench toast.
-///
-/// Throws [ArgumentError] if [key] is not in [kHandoffRegistry].
-Handoff resolveHandoff(String key) {
-  final entry = kHandoffRegistry[key];
-  if (entry == null) {
-    throw ArgumentError(
-      "Unknown handoff key '$key'. Available: ${kHandoffRegistry.keys.join(', ')}",
-    );
-  }
-  // The closure captures [entry] for later use (e.g. Phase 6 toast).
-  return (_) {
-    // Phase 3: no-op — Phase 6 wires the toast.
-    // ignore: avoid_print
-  };
-}
