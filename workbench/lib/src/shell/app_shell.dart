@@ -5,15 +5,16 @@ import 'package:genuiform/genuiform.dart';
 
 import '../editor/code_editor.dart';
 import '../parser/parse_dsl.dart';
+import '../persistence/url_state.dart';
 import '../preview/form_preview.dart';
-import '../scenarios/lead_qualification_dsl.dart';
+import '../scenarios/scenarios.dart';
 import 'split_view.dart';
 
 /// The top-level scaffold of the workbench.
 ///
 /// Renders a top app bar with:
 /// - The app title ("genuiform workbench")
-/// - A scenario [DropdownButton] (visual only in Phase 1–4)
+/// - A scenario [DropdownButton] populated from [kScenarios]
 /// - A "Run" [FilledButton] that re-parses synchronously and resets the form
 /// - A Reset [IconButton] (same behaviour as Run)
 ///
@@ -37,11 +38,12 @@ class AppShell extends StatefulWidget {
 }
 
 class _AppShellState extends State<AppShell> {
-  String _selectedScenario = 'Lead qualification';
-  static const _scenarios = ['Lead qualification'];
+  /// The id of the currently selected scenario, or `'lead_qualification'`
+  /// when no URL hash is present or the hash doesn't match any scenario.
+  String _currentScenarioId = 'lead_qualification';
 
   /// The current DSL source being displayed and edited in the left pane.
-  String _dsl = leadQualificationDsl;
+  late String _dsl;
 
   /// Latest parse result. Guaranteed non-null after initState.
   late ParseResult _parseResult;
@@ -52,17 +54,46 @@ class _AppShellState extends State<AppShell> {
   /// Debounce timer for re-parsing after keystrokes.
   Timer? _debounce;
 
+  /// Last DSL value that was synced to the URL hash (avoids redundant writes).
+  String _lastSyncedDsl = '';
+
   @override
   void initState() {
     super.initState();
+
+    // Attempt to restore state from the URL hash first.
+    final hashDsl = readDslFromUrlHash();
+    if (hashDsl != null) {
+      _dsl = hashDsl;
+      // Find matching scenario by exact DSL equality; fall back to default.
+      final match = kScenarios.where((s) => s.dsl == hashDsl).firstOrNull;
+      _currentScenarioId = match?.id ?? 'lead_qualification';
+    } else {
+      _dsl = kScenarios.first.dsl;
+      _currentScenarioId = kScenarios.first.id;
+    }
+
     // Parse eagerly so _parseResult is always non-null before the first build.
     _parseResult = parseDsl(_dsl);
+
+    // Sync the clean initial state to the URL.
+    if (_parseResult.isClean) {
+      _syncUrl();
+    }
   }
 
   @override
   void dispose() {
     _debounce?.cancel();
     super.dispose();
+  }
+
+  /// Writes the current DSL to the URL hash when it is clean and has changed.
+  void _syncUrl() {
+    if (_parseResult.isClean && _dsl != _lastSyncedDsl) {
+      syncHashToUrl(_dsl);
+      _lastSyncedDsl = _dsl;
+    }
   }
 
   void _onDslChanged(String newDsl) {
@@ -78,7 +109,22 @@ class _AppShellState extends State<AppShell> {
           _formKey++;
         }
       });
+      _syncUrl();
     });
+  }
+
+  /// Called when the user picks a new scenario from the dropdown.
+  void _onScenarioPicked(Scenario scenario) {
+    _debounce?.cancel();
+    setState(() {
+      _currentScenarioId = scenario.id;
+      _dsl = scenario.dsl;
+      _parseResult = parseDsl(_dsl);
+      // Always bump the form key on a deliberate scenario switch — cursor
+      // reset and form restart are desired behaviour here.
+      _formKey++;
+    });
+    _syncUrl();
   }
 
   /// Re-parses the current DSL synchronously and bumps the form key
@@ -89,6 +135,7 @@ class _AppShellState extends State<AppShell> {
       _parseResult = parseDsl(_dsl);
       _formKey++;
     });
+    _syncUrl();
   }
 
   @override
@@ -96,25 +143,28 @@ class _AppShellState extends State<AppShell> {
     // Only pass the form when parsing produced a complete result.
     final hasForm = _parseResult.hasForm;
 
+    final currentScenario =
+        kScenarios.firstWhere((s) => s.id == _currentScenarioId);
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('genuiform workbench'),
         actions: [
           // ── Scenario picker ───────────────────────────────────────────────
-          DropdownButton<String>(
-            value: _selectedScenario,
+          DropdownButton<Scenario>(
+            value: currentScenario,
             underline: const SizedBox.shrink(),
-            items: _scenarios
+            items: kScenarios
                 .map(
-                  (s) => DropdownMenuItem<String>(
+                  (s) => DropdownMenuItem<Scenario>(
                     value: s,
-                    child: Text(s),
+                    child: Text(s.name),
                   ),
                 )
                 .toList(),
-            onChanged: (value) {
-              if (value == null) return;
-              setState(() => _selectedScenario = value);
+            onChanged: (scenario) {
+              if (scenario == null) return;
+              _onScenarioPicked(scenario);
             },
           ),
           const SizedBox(width: 12),
