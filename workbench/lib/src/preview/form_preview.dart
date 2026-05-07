@@ -96,9 +96,10 @@ class _FormPreviewState extends State<FormPreview>
     if (!mounted) return;
     final outcomeId = result.reachedOutcome?.id;
     if (outcomeId == null) return;
+    final messenger = ScaffoldMessenger.of(context)..hideCurrentSnackBar();
     final handoff = widget.handoffMap[outcomeId];
     if (handoff == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      messenger.showSnackBar(
         SnackBar(
           content: Text('Form completed — outcome: $outcomeId'),
         ),
@@ -107,7 +108,7 @@ class _FormPreviewState extends State<FormPreview>
     }
 
     final icon = _iconForHandoff(handoff);
-    ScaffoldMessenger.of(context).showSnackBar(
+    messenger.showSnackBar(
       SnackBar(
         content: Row(
           children: [
@@ -155,9 +156,18 @@ class _FormPreviewState extends State<FormPreview>
               },
               onError: (err) {
                 if (!mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Form error: $err')),
-                );
+                // Don't surface raw transport errors on screen — Vertex's
+                // 4xx/5xx error envelopes can echo project IDs, region info,
+                // or correlation hints that would be visible on a projector.
+                debugPrint('GenuiForm error: $err');
+                ScaffoldMessenger.of(context)
+                  ..hideCurrentSnackBar()
+                  ..showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                          'Form error — see browser console for details.'),
+                    ),
+                  );
               },
             ),
           ),

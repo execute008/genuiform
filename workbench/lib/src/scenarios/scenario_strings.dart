@@ -4,11 +4,6 @@
 /// Each string is a valid DSL that the [parseDsl] function can consume.
 library;
 
-// Re-export the lead qualification DSL for backwards compatibility with
-// existing imports (app_shell.dart imports leadQualificationDsl from
-// lead_qualification_dsl.dart, which re-exports it from here).
-export 'lead_qualification_dsl.dart' show leadQualificationDsl;
-
 // ─────────────────────────────────────────────────────────────────────────────
 // §6.1  Lead Qualification (the hackathon hero)
 // ─────────────────────────────────────────────────────────────────────────────

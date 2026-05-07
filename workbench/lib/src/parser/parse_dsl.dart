@@ -64,7 +64,25 @@ class ParseResult {
 ///   appended to the error list; a partial form is still returned.
 /// - Any unexpected [Exception] is wrapped as a parser-internal-error
 ///   [ParseError] at line 1, col 1.
+/// Hard cap on DSL source length. The largest bundled scenario is ~80 lines
+/// (~3 KB); 64 KB is well above any reasonable hand-written DSL but bounds
+/// pathological pasted input so the lexer / parser don't churn the UI thread.
+const int _maxSourceChars = 64 * 1024;
+
 ParseResult parseDsl(String source) {
+  if (source.length > _maxSourceChars) {
+    return ParseResult(
+      errors: [
+        ParseError(
+          line: 1,
+          column: 1,
+          message:
+              'DSL too large (${source.length} chars; max $_maxSourceChars).',
+          hint: 'Trim the DSL or split it into smaller scenarios.',
+        ),
+      ],
+    );
+  }
   try {
     final tokens = Lexer(source).tokenize();
     final ast = Parser(tokens).parseForm();

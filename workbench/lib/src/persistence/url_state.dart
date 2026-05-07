@@ -27,17 +27,29 @@ String encodeDslToHash(String dsl) {
   return base64Url.encode(compressed);
 }
 
+/// Hard caps that defend against gzip-bomb URLs. The largest bundled scenario
+/// is ~3 KB of source; an attacker-supplied hash that decompresses far beyond
+/// these limits is rejected as malicious.
+const int _maxCompressedBytes = 16 * 1024; // 16 KB compressed input
+const int _maxDecompressedBytes = 256 * 1024; // 256 KB decompressed output
+const int _maxDslChars = 64 * 1024; // 64 KB of DSL text
+
 /// Decodes a hash produced by [encodeDslToHash] back into the original DSL.
 ///
 /// Returns `null` when [hash] is empty, contains invalid base64url characters,
-/// or the decompressed bytes are not valid UTF-8.
+/// the compressed payload is too large, the decompressed payload is too large,
+/// or the bytes are not valid UTF-8.
 String? decodeDslFromHash(String hash) {
   if (hash.isEmpty) return null;
   try {
     final compressed = base64Url.decode(base64Url.normalize(hash));
+    if (compressed.length > _maxCompressedBytes) return null;
     final decoder = GZipDecoder();
     final bytes = decoder.decodeBytes(compressed);
-    return utf8.decode(bytes);
+    if (bytes.length > _maxDecompressedBytes) return null;
+    final decoded = utf8.decode(bytes);
+    if (decoded.length > _maxDslChars) return null;
+    return decoded;
   } catch (_) {
     return null;
   }

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:genuiform/genuiform.dart';
 
@@ -22,12 +24,29 @@ class DebugStrip extends StatefulWidget {
 
 class _DebugStripState extends State<DebugStrip> {
   late Session _session;
+  StreamSubscription<Session>? _sub;
 
   @override
   void initState() {
     super.initState();
     _session = widget.controller.currentSession;
-    widget.controller.sessions.listen(_onSession);
+    _sub = widget.controller.sessions.listen(_onSession);
+  }
+
+  @override
+  void didUpdateWidget(DebugStrip old) {
+    super.didUpdateWidget(old);
+    if (!identical(old.controller, widget.controller)) {
+      _sub?.cancel();
+      _session = widget.controller.currentSession;
+      _sub = widget.controller.sessions.listen(_onSession);
+    }
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
   }
 
   void _onSession(Session session) {

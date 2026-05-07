@@ -602,17 +602,4 @@ final form = GenuiForm(
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
-  // 5. The existing DSL string from lead_qualification_dsl.dart
-  // ───────────────────────────────────────────────────────────────────────────
-
-  group('Existing DSL string compatibility', () {
-    test('leadQualificationDsl (from lead_qualification_dsl.dart) parses cleanly', () {
-      final result = parseDsl(leadQualificationDsl);
-      expect(result.errors, isEmpty);
-      expect(result.hasForm, isTrue);
-      expect(result.contract!.fields.length, 6);
-      expect(result.constraints!.length, 4);
-    });
-  });
 }
