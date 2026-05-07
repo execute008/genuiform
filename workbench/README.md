@@ -35,6 +35,15 @@ flutter run -d chrome \
 
 If any are missing, the workbench shows a paste panel as a fallback.
 
+To enable the full A2UI round-trip (Vertex emits A2UI v0.9 JSON per outcome,
+rendered live via `flutter/genui`, with an in-Surface Restart action), add:
+
+```
+  --dart-define=USE_A2UI_HANDOFF=true
+```
+
+The default (unflagged) path is unchanged: form completion shows a handoff toast.
+
 For a stage-safe demo path that never calls Vertex:
 
 ```bash

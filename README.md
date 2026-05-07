@@ -50,6 +50,8 @@ Google's [A2UI protocol](https://a2ui.org) (and the [`flutter/genui`](https://pu
 
 The two compose well. The hackathon workbench can render terminal outcome screens via `flutter/genui` (see `A2UI_AGENDA.md` for status); the form-collection loop itself stays inside genuiform's typed primitives.
 
+The workbench now demonstrates the full round-trip in one integrated flow: form completes → Vertex emits A2UI v0.9 JSON → `flutter/genui` renders the Surface → the in-Surface Restart button dispatches an A2UI action → the workbench restarts the form. This is a working integration showcase; the library itself (`genuiform`) is unchanged — it remains the constraints layer above, not an A2UI-native component. See `A2UI_C_V2_SPEC.md` for the implementation spec and `workbench/README.md` for how to run it.
+
 ---
 
 ## 2. The four primitives

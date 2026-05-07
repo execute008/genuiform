@@ -534,9 +534,11 @@ class _AboutDialog extends StatelessWidget {
                 "that: where A2UI asks \"what should the UI look like this "
                 'turn?", genuiform asks "what should we ask next, given hard '
                 'invariants on what may ever be collected and where the form '
-                'may land?". The two compose — the workbench can render '
-                'outcome screens via flutter/genui while the form-collection '
-                "loop stays inside genuiform's typed primitives.",
+                'may land?". The workbench closes the live round-trip: Vertex '
+                'emits A2UI v0.9 JSON per outcome, flutter/genui renders the '
+                'Surface, and the in-Surface Restart button fires back through '
+                'an A2UI action — all while the form-collection loop stays '
+                "inside genuiform's typed primitives.",
               ),
               SizedBox(height: 16),
               Divider(),

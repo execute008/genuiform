@@ -56,7 +56,7 @@ Effort: ~1 day. Risk: low (isolated to one client class). Value: lets
 genuiform consume any a2ui-compatible backend; a useful answer to the
 "what about Google's standard?" question.
 
-### C — `A2uiStepRenderer` for handoff/escalation UIs (PoC: ✅ landed; v2: backlog)
+### C — `A2uiStepRenderer` for handoff/escalation UIs (PoC: ✅ landed; v2: ✅ landed 2026-05-07)
 
 For terminal `Outcome`s, render the completion screen via `genui`'s
 `Surface` widget instead of a handoff toast, driven by a hand-crafted A2UI
@@ -96,17 +96,36 @@ The wasm dry-run reports `dart:html unsupported` from
 `isolate_contactor` (a `genui` transitive dep). This affects wasm only;
 the JS web build succeeds. Not blocking.
 
-**v2 work to land before the demo if we want full a2ui-emit-by-LLM:**
-- Have Vertex emit A2UI v0.9 JSON for each outcome via structured output
-  (`responseSchema`), keyed off the handoff registry name; pipe through
-  `A2uiTransportAdapter.addChunk`. Estimate: ~2-4 hours, blocked only on
-  drafting the per-outcome system prompt.
-- Wire A2UI `action` events back to genuiform's restart flow so the
-  Restart button can live inside the Surface. Estimate: ~1-2 hours.
+**v2 — landed 2026-05-07** (spec: `A2UI_C_V2_SPEC.md`; commits `eb5011e`…`36bf050`):
+- Vertex emits A2UI v0.9 JSON per outcome via structured output
+  (`responseSchema`), driven by `A2uiOutcomeEmitter` + `a2ui_outcome_prompt.dart`.
+  Piped through `genui.A2uiTransportAdapter` into `genui.SurfaceController`.
+- A2UI `action` events wired to the existing `onRestart` callback via
+  `A2uiActionHandler`; the Restart button now lives inside the Surface.
+- `A2uiOutcomeLoader` applies a 5-second timeout and falls back to the
+  v1 hand-crafted tree gracefully (mock-LLM path also falls back).
+- Default demo path (`USE_A2UI_HANDOFF=false`) unchanged.
 
-If we land both v2 items, the demo gains a genuine "form completes →
-LLM-emitted A2UI screen renders → Restart triggers via A2UI action" round
-trip. That's a much stronger judging story than the toast.
+The full round-trip (form completes → Vertex emits A2UI → genui renders →
+in-Surface Restart → form restarts) works end-to-end with real Vertex creds.
+
+#### Backlog (v3 and beyond)
+
+Items out of scope for v2 that remain on the table:
+
+- **Action roundtrip beyond Restart** — expose other A2UI actions (share,
+  navigate, custom callbacks) through the workbench's action registry.
+- **Generative UI per outcome** — let Vertex emit fully bespoke component
+  trees per outcome rather than a scripted template. Requires more prompt
+  iteration and possibly a richer per-outcome hint in the handoff registry.
+- **Multi-surface** — stack multiple `genui` Surfaces (e.g. a summary card
+  alongside the restart screen) or show A2UI output for intermediate steps,
+  not just terminal outcomes.
+- **A2UI-driven escalation cards** — replace `_EscalationCard` with a
+  genui-rendered surface when `EscalateIf` fires.
+- **Bidirectional data binding** — outcome screens that accept user input
+  (e.g. a date picker for a scheduled call) and feed it back through an
+  A2UI action payload.
 
 ## Decision log
 
