@@ -105,10 +105,13 @@ class A2uiOutcomeEmitter {
       summary: summary,
     );
 
-    // client.generate() emits on its error channel for LlmClientError
-    // subtypes; we propagate those by awaiting each event and letting the
-    // async* generator's implicit error channel pass them through.
-    await for (final rawChunk in client.generate(
+    // client.generate() yields incremental deltas (one per SSE event from the
+    // underlying transport) and forwards LlmClientError subtypes on its error
+    // channel. We accumulate all deltas into a single buffer, then parse the
+    // resulting JSON once the upstream stream closes — errors propagate
+    // through async*'s implicit error channel.
+    final buffer = StringBuffer();
+    await for (final delta in client.generate(
       systemPrompt: systemPrompt,
       messages: [
         Message(
@@ -119,40 +122,38 @@ class A2uiOutcomeEmitter {
       responseSchema: a2uiOutcomeResponseSchema(),
       model: model,
     )) {
-      // Vertex returns one complete JSON string (buffered by VertexDirectClient).
-      // Parse it and reconstruct the two A2UI wire envelopes.
-      final Map<String, dynamic> parsed;
-      try {
-        parsed = (jsonDecode(rawChunk) as Map<String, dynamic>);
-      } catch (e) {
-        // The raw response is not valid JSON — treat as a schema error.
-        throw SchemaError(
-          'A2uiOutcomeEmitter: Vertex response is not valid JSON. '
-          'Cause: $e',
-        );
-      }
-
-      final createSurfacePayload = parsed['createSurface'];
-      final updateComponentsPayload = parsed['updateComponents'];
-
-      if (createSurfacePayload == null || updateComponentsPayload == null) {
-        throw SchemaError(
-          'A2uiOutcomeEmitter: Vertex response is missing required keys '
-          '"createSurface" or "updateComponents". Got keys: ${parsed.keys}',
-        );
-      }
-
-      // Yield the createSurface envelope.
-      yield jsonEncode({
-        'version': 'v0.9',
-        'createSurface': createSurfacePayload,
-      });
-
-      // Yield the updateComponents envelope.
-      yield jsonEncode({
-        'version': 'v0.9',
-        'updateComponents': updateComponentsPayload,
-      });
+      buffer.write(delta);
     }
+
+    final raw = buffer.toString();
+    final Map<String, dynamic> parsed;
+    try {
+      parsed = (jsonDecode(raw) as Map<String, dynamic>);
+    } catch (e) {
+      throw SchemaError(
+        'A2uiOutcomeEmitter: Vertex response is not valid JSON. '
+        'Cause: $e',
+      );
+    }
+
+    final createSurfacePayload = parsed['createSurface'];
+    final updateComponentsPayload = parsed['updateComponents'];
+
+    if (createSurfacePayload == null || updateComponentsPayload == null) {
+      throw SchemaError(
+        'A2uiOutcomeEmitter: Vertex response is missing required keys '
+        '"createSurface" or "updateComponents". Got keys: ${parsed.keys}',
+      );
+    }
+
+    yield jsonEncode({
+      'version': 'v0.9',
+      'createSurface': createSurfacePayload,
+    });
+
+    yield jsonEncode({
+      'version': 'v0.9',
+      'updateComponents': updateComponentsPayload,
+    });
   }
 }
