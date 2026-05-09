@@ -374,6 +374,7 @@ void main() {
         controller.events.listen(events.add);
 
         await controller.submitAnswer('Alice');
+        await Future.microtask(() {}); // flush async event delivery
 
         expect(controller.currentSession.history, hasLength(1),
             reason: 'answer should be recorded once despite strategy failure');
@@ -382,6 +383,7 @@ void main() {
         expect(events.last, isA<StreamError>());
 
         await controller.retryStrategy();
+        await Future.microtask(() {});
 
         expect(controller.currentSession.history, hasLength(1),
             reason: 'retryStrategy must not append a duplicate history entry');

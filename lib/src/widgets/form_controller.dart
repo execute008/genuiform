@@ -160,7 +160,7 @@ class FormController {
     _emitSession();
 
     // ── Step 5: run strategy loop ───────────────────────────────────────────
-    await _runStrategyLoop();
+    await _runStrategyLoop(clearStepOnError: true);
   }
 
   /// Pops the last answer from history without calling the LLM.
@@ -198,6 +198,15 @@ class FormController {
     );
 
     _emitSession();
+  }
+
+  /// Re-runs [Strategy.nextStep] from the current session state without
+  /// modifying history or resetting the session.
+  ///
+  /// Use this when a [StreamError] was emitted and the caller wants to retry
+  /// only the LLM call — not re-submit the answer, and not reset progress.
+  Future<void> retryStrategy() async {
+    await _runStrategyLoop();
   }
 
   /// Resets the form to its initial state and calls [start] again.
@@ -304,7 +313,13 @@ class FormController {
   ///
   /// Collects all events from the strategy and processes them. The loop ends
   /// naturally when the strategy generator completes.
-  Future<void> _runStrategyLoop() async {
+  ///
+  /// When [clearStepOnError] is true and a [StreamError] is received,
+  /// [_currentStep] is set to null before handling the event. This prevents
+  /// the "Next" button from re-appearing after a failed strategy call that
+  /// was triggered by [submitAnswer], which would otherwise allow the user to
+  /// re-submit the same answer and duplicate the history entry.
+  Future<void> _runStrategyLoop({bool clearStepOnError = false}) async {
     if (_disposed) return;
     _isAwaiting = true;
 
@@ -315,6 +330,9 @@ class FormController {
       final events = await _strategy.nextStep(_session, config).toList();
       for (final event in events) {
         if (_disposed) break;
+        if (clearStepOnError && event is StreamError) {
+          _currentStep = null;
+        }
         _handleStrategyEvent(event);
       }
     } finally {

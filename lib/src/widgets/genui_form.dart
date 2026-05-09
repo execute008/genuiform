@@ -45,7 +45,7 @@ import 'streaming_indicator.dart';
 ///   constraints: [NeverCollect('payment_info'), MaxSteps(8)],
 ///   posture: Posture.salesDiscovery(),
 ///   outcomes: leadOutcomes,
-///   client: vertexClient,
+///   client: geminiClient,
 ///   model: 'gemini-2.5-flash',
 ///   onComplete: (result) => handleResult(result),
 /// )
@@ -82,7 +82,7 @@ class GenuiForm extends StatefulWidget {
   /// The LLM transport.
   final LlmClient client;
 
-  /// The Vertex AI model ID string (e.g. `'gemini-2.5-flash'`).
+  /// The Gemini model ID string (e.g. `'gemini-2.5-flash'`).
   final String model;
 
   /// Sampling temperature forwarded to the underlying [FormConfig].
@@ -230,10 +230,7 @@ class _GenuiFormState extends State<GenuiForm> {
   }
 
   void _retry() {
-    // Re-issue the last submitAnswer with the same value by calling start()
-    // to resume from the current session state — effectively retrying the LLM
-    // call for the next step.
-    _controller.start();
+    _controller.retryStrategy();
   }
 
   void _restart() {
@@ -319,8 +316,8 @@ class _GenuiFormState extends State<GenuiForm> {
               onChanged: (v) => setState(() => _currentValue = v),
               onSubmit: _submitAnswer,
             ),
-          ] else if (!isAwaiting) ...[
-            // No step yet and not awaiting — show a placeholder
+          ] else if (!isAwaiting && lastEvent is! StreamError) ...[
+            // No step yet, not awaiting, and no error — show a placeholder
             const Center(child: CircularProgressIndicator()),
           ],
 
