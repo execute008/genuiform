@@ -44,15 +44,19 @@ class AppShell extends StatefulWidget {
   /// model on the next emit / step.
   final ValueNotifier<String> model;
 
-  /// Models offered by the toolbar dropdown. Includes the currently-broken
-  /// `gemini-3-flash-preview` deliberately so degenerate-loop bugs can be
-  /// reproduced and bisected.
+  /// Models offered by the toolbar dropdown.
+  ///
+  /// `*-latest` aliases follow whatever Gemini currently routes to (today
+  /// that includes the gemini-3 preview line) — keep them so the "what does
+  /// latest behave like right now?" path is one click away. The pinned 2.5
+  /// entries give a stable baseline for bisection. We deliberately do NOT
+  /// list explicit gemini-3 IDs here because the `-latest` aliases already
+  /// cover that family.
   static const candidateModels = <String>[
     'gemini-flash-latest',
+    'gemini-pro-latest',
     'gemini-2.5-flash',
     'gemini-2.5-pro',
-    'gemini-3-flash-preview',
-    'gemini-3-pro-preview',
   ];
 
   /// When true, a persistent MOCK badge is shown in the top bar.
