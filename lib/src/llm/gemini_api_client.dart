@@ -22,16 +22,26 @@ import '../models/message.dart';
 /// Auth is sent as `x-goog-api-key: <apiKey>`. Static `AIza...`-prefixed keys
 /// are accepted; OAuth tokens are not.
 ///
+/// ### Streaming
+///
+/// The endpoint is called with `?alt=sse` so the response is a Server-Sent
+/// Events stream. [generate] yields one text delta per SSE event as bytes
+/// arrive — consumers must concatenate the deltas to reconstruct the final
+/// JSON.
+///
 /// Example:
 /// ```dart
 /// final client = GeminiApiClient(apiKey: 'AIza...');
-/// final stream = client.generate(
+/// final buffer = StringBuffer();
+/// await for (final delta in client.generate(
 ///   systemPrompt: systemPrompt,
 ///   messages: session.history.map((a) => a.message).toList(),
 ///   responseSchema: generativeStrategyResponseSchema(),
 ///   model: 'gemini-2.5-flash',
-/// );
-/// final json = await stream.first;
+/// )) {
+///   buffer.write(delta);
+/// }
+/// final json = jsonDecode(buffer.toString());
 /// ```
 class GeminiApiClient extends LlmClient {
   /// The Gemini API key (typically `AIza...`-prefixed).
@@ -41,8 +51,9 @@ class GeminiApiClient extends LlmClient {
 
   /// Creates a [GeminiApiClient].
   ///
-  /// Inject [httpClient] to use a test double (e.g. `MockClient` from
-  /// `package:http/testing.dart`). If omitted, a real [http.Client] is used.
+  /// Inject [httpClient] to use a test double (e.g. `MockClient.streaming`
+  /// from `package:http/testing.dart`). If omitted, a real [http.Client] is
+  /// used.
   GeminiApiClient({
     required this.apiKey,
     http.Client? httpClient,
@@ -52,7 +63,7 @@ class GeminiApiClient extends LlmClient {
     return Uri.parse(
       'https://generativelanguage.googleapis.com/v1beta/models/$model'
       ':streamGenerateContent',
-    );
+    ).replace(queryParameters: {'alt': 'sse'});
   }
 
   Map<String, dynamic> _messageToContent(Message message) {
@@ -69,8 +80,8 @@ class GeminiApiClient extends LlmClient {
     };
   }
 
-  Duration? _parseRetryAfter(http.Response response) {
-    final raw = response.headers['retry-after'];
+  Duration? _parseRetryAfter(Map<String, String> headers) {
+    final raw = headers['retry-after'];
     if (raw == null) return null;
     final seconds = int.tryParse(raw);
     if (seconds == null) return null;
@@ -124,16 +135,14 @@ class GeminiApiClient extends LlmClient {
       },
     };
 
-    http.Response response;
+    final request = http.Request('POST', uri);
+    request.headers['x-goog-api-key'] = apiKey;
+    request.headers['Content-Type'] = 'application/json';
+    request.body = jsonEncode(payload);
+
+    http.StreamedResponse response;
     try {
-      response = await _httpClient.post(
-        uri,
-        headers: {
-          'x-goog-api-key': apiKey,
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode(payload),
-      );
+      response = await _httpClient.send(request);
     } on SocketException catch (e) {
       throw NetworkError('Socket error: ${e.message}', cause: e);
     } on http.ClientException catch (e) {
@@ -144,72 +153,84 @@ class GeminiApiClient extends LlmClient {
       throw UnknownError('Unexpected error during HTTP request', cause: e);
     }
 
-    if (response.statusCode == 401 || response.statusCode == 403) {
-      throw AuthError(
-        'Gemini API returned HTTP ${response.statusCode}: ${response.body}',
-      );
-    }
-
-    if (response.statusCode == 429) {
-      throw RateLimitError(
-        'Gemini API rate limit exceeded (HTTP 429)',
-        retryAfter: _parseRetryAfter(response),
-      );
-    }
-
-    if (response.statusCode >= 500) {
-      throw NetworkError(
-        'Gemini API server error (HTTP ${response.statusCode}): ${response.body}',
-      );
-    }
-
-    if (response.statusCode >= 400) {
-      throw SchemaError(
-        'Gemini API rejected request (HTTP ${response.statusCode}): ${response.body}',
-      );
-    }
-
-    List<dynamic> chunks;
-    try {
-      chunks = jsonDecode(response.body) as List<dynamic>;
-    } catch (e) {
-      throw SchemaError(
-        'Failed to parse Gemini API response envelope as JSON array: $e',
-      );
-    }
-
-    final buffer = StringBuffer();
-    for (final chunk in chunks) {
-      try {
-        final chunkMap = chunk as Map<String, dynamic>;
-        final candidates = chunkMap['candidates'] as List<dynamic>;
-        for (final candidate in candidates) {
-          final content =
-              (candidate as Map<String, dynamic>)['content'] as Map<String, dynamic>;
-          final parts = content['parts'] as List<dynamic>;
-          for (final part in parts) {
-            final text = (part as Map<String, dynamic>)['text'] as String;
-            buffer.write(text);
-          }
-        }
-      } catch (e) {
-        throw SchemaError(
-          'Failed to extract text from Gemini API response chunk: $e',
+    final status = response.statusCode;
+    if (status != 200) {
+      final body = await response.stream.bytesToString();
+      if (status == 401 || status == 403) {
+        throw AuthError('Gemini API returned HTTP $status: $body');
+      }
+      if (status == 429) {
+        throw RateLimitError(
+          'Gemini API rate limit exceeded (HTTP 429)',
+          retryAfter: _parseRetryAfter(response.headers),
         );
       }
-    }
-
-    final accumulated = buffer.toString();
-
-    try {
-      jsonDecode(accumulated);
-    } catch (e) {
+      if (status >= 500) {
+        throw NetworkError(
+          'Gemini API server error (HTTP $status): $body',
+        );
+      }
       throw SchemaError(
-        'Gemini API response text is not valid JSON: $e\n'
-        'Raw text (first 500 chars): ${accumulated.substring(0, accumulated.length.clamp(0, 500))}',
+        'Gemini API rejected request (HTTP $status): $body',
       );
     }
 
-    yield accumulated;
+    // Parse the Server-Sent Events stream incrementally. Each `data: {...}`
+    // line is one Gemini chunk; we extract its text part and yield it as a
+    // delta. Consumers concatenate deltas to reconstruct the full JSON.
+    final lines = response.stream
+        .transform(utf8.decoder)
+        .transform(const LineSplitter());
+
+    await for (final line in lines) {
+      if (line.isEmpty) continue;
+      if (line.startsWith(':')) continue; // SSE comment / keep-alive
+      if (!line.startsWith('data:')) continue;
+
+      final data = line.substring(5).trim();
+      if (data.isEmpty) continue;
+
+      Map<String, dynamic> chunkMap;
+      try {
+        chunkMap = jsonDecode(data) as Map<String, dynamic>;
+      } catch (e) {
+        throw SchemaError(
+          'Failed to parse Gemini SSE event as JSON: $e',
+        );
+      }
+
+      final delta = _extractTextDelta(chunkMap);
+      if (delta.isNotEmpty) {
+        yield delta;
+      }
+    }
+  }
+
+  /// Extracts concatenated text from `candidates[*].content.parts[*].text`
+  /// in a single Gemini chunk. Returns an empty string if no text parts are
+  /// present (e.g. safety-rating-only events).
+  static String _extractTextDelta(Map<String, dynamic> chunkMap) {
+    try {
+      final candidates = chunkMap['candidates'] as List<dynamic>?;
+      if (candidates == null || candidates.isEmpty) return '';
+
+      final buffer = StringBuffer();
+      for (final candidate in candidates) {
+        final content = (candidate as Map<String, dynamic>)['content']
+            as Map<String, dynamic>?;
+        if (content == null) continue;
+        final parts = content['parts'] as List<dynamic>?;
+        if (parts == null) continue;
+        for (final part in parts) {
+          final text = (part as Map<String, dynamic>)['text'] as String?;
+          if (text != null) buffer.write(text);
+        }
+      }
+      return buffer.toString();
+    } catch (e) {
+      throw SchemaError(
+        'Failed to extract text from Gemini SSE event: $e',
+      );
+    }
   }
 }

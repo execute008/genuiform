@@ -8,20 +8,24 @@ import 'package:genuiform/src/llm/gemini_api_client.dart';
 import 'package:genuiform/src/llm/llm_client.dart';
 import 'package:genuiform/src/models/message.dart';
 
-/// Builds a well-formed Gemini streamGenerateContent response wrapping [text].
-String _geminiResponse(String text) => jsonEncode([
+/// Builds a single Gemini SSE event line wrapping [text] as the part text.
+String _sseEvent(String text) {
+  final payload = jsonEncode({
+    'candidates': [
       {
-        'candidates': [
-          {
-            'content': {
-              'parts': [
-                {'text': text},
-              ],
-            },
-          },
-        ],
+        'content': {
+          'parts': [
+            {'text': text},
+          ],
+        },
       },
-    ]);
+    ],
+  });
+  return 'data: $payload\n\n';
+}
+
+/// Convenience wrapper: a 200 SSE response with a single event for [text].
+String _sseResponse(String text) => _sseEvent(text);
 
 GeminiApiClient _makeClient(MockClientHandler handler) => GeminiApiClient(
       apiKey: 'AIza-test-key',
@@ -36,7 +40,7 @@ void main() {
       final client = _makeClient((request) async {
         capturedUri = request.url;
         return http.Response(
-          _geminiResponse('{"decision":"ask_step"}'),
+          _sseResponse('{"decision":"ask_step"}'),
           200,
         );
       });
@@ -50,11 +54,13 @@ void main() {
           )
           .first;
 
+      expect(capturedUri.host, 'generativelanguage.googleapis.com');
       expect(
-        capturedUri.toString(),
-        'https://generativelanguage.googleapis.com/v1beta/models/'
-        'gemini-2.5-flash:streamGenerateContent',
+        capturedUri.path,
+        '/v1beta/models/gemini-2.5-flash:streamGenerateContent',
       );
+      // SSE mode is required for incremental streaming.
+      expect(capturedUri.queryParameters['alt'], 'sse');
     });
 
     test('sends x-goog-api-key header (no Bearer)', () async {
@@ -62,7 +68,7 @@ void main() {
 
       final client = _makeClient((request) async {
         capturedHeaders = request.headers;
-        return http.Response(_geminiResponse('{"ok":true}'), 200);
+        return http.Response(_sseResponse('{"ok":true}'), 200);
       });
 
       await client
@@ -83,7 +89,7 @@ void main() {
 
       final client = _makeClient((request) async {
         capturedBody = jsonDecode(request.body) as Map<String, dynamic>;
-        return http.Response(_geminiResponse('{"ok":true}'), 200);
+        return http.Response(_sseResponse('{"ok":true}'), 200);
       });
 
       await client
@@ -114,7 +120,7 @@ void main() {
 
       final client = _makeClient((request) async {
         capturedBody = jsonDecode(request.body) as Map<String, dynamic>;
-        return http.Response(_geminiResponse('{"ok":true}'), 200);
+        return http.Response(_sseResponse('{"ok":true}'), 200);
       });
 
       await client
@@ -140,66 +146,45 @@ void main() {
       expect(genCfg['responseSchema'], schema);
     });
 
-    test('emits a single complete JSON string from stream', () async {
+    test('yields a single delta when the SSE response has one event',
+        () async {
       final client = _makeClient(
         (request) async => http.Response(
-          _geminiResponse('{"decision":"ask_step","engagement":"strong"}'),
+          _sseResponse('{"decision":"ask_step","engagement":"strong"}'),
           200,
         ),
       );
 
-      final result = await client
+      final deltas = await client
           .generate(
             systemPrompt: 'sys',
             messages: [Message(role: MessageRole.user, content: 'hi')],
             responseSchema: {},
             model: 'gemini-2.5-flash',
           )
-          .first;
+          .toList();
 
-      expect(result, '{"decision":"ask_step","engagement":"strong"}');
+      expect(deltas, ['{"decision":"ask_step","engagement":"strong"}']);
     });
 
-    test('buffers multiple chunk texts into a single emission', () async {
-      final multiChunkResponse = jsonEncode([
-        {
-          'candidates': [
-            {
-              'content': {
-                'parts': [
-                  {'text': '{"hello"'},
-                ],
-              },
-            },
-          ],
-        },
-        {
-          'candidates': [
-            {
-              'content': {
-                'parts': [
-                  {'text': ':1}'},
-                ],
-              },
-            },
-          ],
-        },
-      ]);
+    test('yields one delta per SSE event in the response body', () async {
+      final body = _sseResponse('{"hello"') + _sseResponse(':1}');
 
       final client = _makeClient(
-        (request) async => http.Response(multiChunkResponse, 200),
+        (request) async => http.Response(body, 200),
       );
 
-      final result = await client
+      final deltas = await client
           .generate(
             systemPrompt: 'sys',
             messages: [],
             responseSchema: {},
             model: 'gemini-2.5-flash',
           )
-          .first;
+          .toList();
 
-      expect(jsonDecode(result), {'hello': 1});
+      expect(deltas, ['{"hello"', ':1}']);
+      expect(jsonDecode(deltas.join()), {'hello': 1});
     });
   });
 
@@ -377,10 +362,10 @@ void main() {
       );
     });
 
-    test('non-JSON inner text maps to SchemaError', () async {
+    test('malformed SSE event JSON maps to SchemaError', () async {
       final client = _makeClient(
         (request) async => http.Response(
-          _geminiResponse('not valid json {{{'),
+          'data: this-is-not-json\n\n',
           200,
         ),
       );
@@ -396,20 +381,25 @@ void main() {
       );
     });
 
-    test('malformed envelope maps to SchemaError', () async {
+    test('non-SSE 200 body yields no deltas (consumer detects empty)',
+        () async {
+      // The client is now a transport — it does not validate that the body is
+      // SSE. A 200 response with no `data:` lines simply produces no deltas;
+      // it is the consumer's job to detect "no output" and fail accordingly.
       final client = _makeClient(
-        (request) async => http.Response('this is not json at all', 200),
+        (request) async => http.Response('this is not sse at all', 200),
       );
 
-      await expectLater(
-        client.generate(
-          systemPrompt: 'sys',
-          messages: [],
-          responseSchema: {},
-          model: 'gemini-2.5-flash',
-        ),
-        emitsError(isA<SchemaError>()),
-      );
+      final deltas = await client
+          .generate(
+            systemPrompt: 'sys',
+            messages: [],
+            responseSchema: {},
+            model: 'gemini-2.5-flash',
+          )
+          .toList();
+
+      expect(deltas, isEmpty);
     });
 
     test('http.ClientException maps to NetworkError', () async {
