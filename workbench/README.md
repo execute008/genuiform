@@ -24,16 +24,29 @@ right pane wraps into a live `GenuiForm`. See `WORKBENCH_SPEC.md` §1 for why.
 
 ## Run it
 
-Three `--dart-define` keys feed the Vertex transport:
+The workbench supports two live transports plus a stage-safe mock.
+
+**Option A — Google AI Studio (recommended for demos).** Grab a free key from
+[aistudio.google.com/apikey](https://aistudio.google.com/apikey) — no GCP
+project, no OAuth dance:
+
+```bash
+flutter run -d chrome --dart-define=GEMINI_API_KEY=AIza...
+```
+
+**Option B — Vertex AI.** Three `--dart-define` keys feed the Vertex transport.
+`VERTEX_API_KEY` is a short-lived OAuth bearer (e.g. `gcloud auth
+print-access-token`), **not** an `AIza...` key:
 
 ```bash
 flutter run -d chrome \
-  --dart-define=VERTEX_API_KEY=<your-token> \
+  --dart-define=VERTEX_API_KEY=<oauth-token> \
   --dart-define=VERTEX_PROJECT_ID=<your-gcp-project> \
   --dart-define=VERTEX_LOCATION=europe-west1
 ```
 
-If any are missing, the workbench shows a paste panel as a fallback.
+If both transports are configured at compile time, Gemini wins. If neither is
+set, the workbench shows a paste panel with both options.
 
 To enable the full A2UI round-trip (Vertex emits A2UI v0.9 JSON per outcome,
 rendered live via `flutter/genui`, with an in-Surface Restart action), add:
@@ -75,9 +88,17 @@ you're in.
 
 ## Build for production
 
+Gemini API key (single flag):
+
+```bash
+flutter build web --release --dart-define=GEMINI_API_KEY=AIza...
+```
+
+Vertex AI:
+
 ```bash
 flutter build web --release \
-  --dart-define=VERTEX_API_KEY=<token> \
+  --dart-define=VERTEX_API_KEY=<oauth-token> \
   --dart-define=VERTEX_PROJECT_ID=<project> \
   --dart-define=VERTEX_LOCATION=europe-west1
 ```
@@ -92,9 +113,9 @@ we ship in `web/index.html`).
 flutter test
 ```
 
-77 tests across the lexer, parser, builder, four scenario round-trips, URL
+144 tests across the lexer, parser, builder, four scenario round-trips, URL
 hash round-trip, and a top-level widget smoke. The genuiform library has its
-own 515-test suite — run from the repo root with `flutter test`.
+own 528-test suite — run from the repo root with `flutter test`.
 
 ## Phases
 
