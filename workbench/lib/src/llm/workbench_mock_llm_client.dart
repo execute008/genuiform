@@ -4,9 +4,8 @@ import 'package:genuiform/genuiform.dart';
 
 /// A scripted [LlmClient] used in demo/mock mode (`--dart-define=USE_MOCK=true`).
 ///
-/// Returns canned step JSON matching the [GenerativeStrategy] schema for the
-/// lead_qualification scenario: four [ask_step] responses followed by a
-/// [complete] response with `outcome_id: 'book_call'`.
+/// Returns canned step JSON matching the [GenerativeStrategy] schema.
+/// Detects the scenario from the system prompt and returns appropriate outcomes.
 ///
 /// This is intentionally separate from [FakeLlmClient] (which lives in the
 /// library and is test-scoped). This one is workbench-local and simulates a
@@ -18,20 +17,52 @@ class WorkbenchMockLlmClient extends LlmClient {
 
   static const _delay = Duration(milliseconds: 600);
 
-  /// Scripted responses for the lead_qualification scenario.
-  static const _responses = <String>[
+  /// Detect which scenario we're in from the system prompt
+  String _detectScenario(String systemPrompt) {
+    if (systemPrompt.contains('full_meal_plan') || systemPrompt.contains('workout_only')) {
+      return 'gymgeist';
+    } else if (systemPrompt.contains('subscribed')) {
+      return 'newsletter';
+    } else if (systemPrompt.contains('intake_complete')) {
+      return 'medical';
+    } else if (systemPrompt.contains('book_call') || systemPrompt.contains('send_proposal')) {
+      return 'lead_qualification';
+    }
+    return 'lead_qualification'; // default
+  }
+
+  /// Get the appropriate completion response for each scenario
+  String _getCompletionForScenario(String scenario) {
+    switch (scenario) {
+      case 'gymgeist':
+        // For GymGeist, we need to handle the branch resolution first
+        if (_callCount == 5) {
+          return '{"decision":"resolve_branch","engagement":"strong","branch_resolution":{"branch_id":"nutrition_path","option_id":"with_meal_plan","rationale":"User wants meal planning."}}';
+        }
+        return '{"decision":"complete","engagement":"strong","outcome":{"outcome_id":"full_meal_plan","summary":"Complete fitness and nutrition setup."}}';
+      case 'newsletter':
+        return '{"decision":"complete","engagement":"strong","outcome":{"outcome_id":"subscribed","summary":"Successfully subscribed to newsletter."}}';
+      case 'medical':
+        return '{"decision":"complete","engagement":"strong","outcome":{"outcome_id":"intake_complete","summary":"Medical intake form completed."}}';
+      case 'lead_qualification':
+      default:
+        if (_callCount == 5) {
+          return '{"decision":"resolve_branch","engagement":"strong","branch_resolution":{"branch_id":"lead_split","option_id":"book_call","rationale":"Qualified lead with clear brief and immediate timeline."}}';
+        }
+        return '{"decision":"complete","engagement":"strong","outcome":{"outcome_id":"book_call","summary":"Qualified senior decision-maker with clear brief and immediate timeline."}}';
+    }
+  }
+
+  /// Generic ask steps that work for any scenario
+  static const _genericSteps = <String>[
     // Turn 1 — ask for name
     '{"decision":"ask_step","engagement":"strong","step":{"id":"step_name","title":"What\'s your name?","inputType":"text"}}',
-    // Turn 2 — ask for company
-    '{"decision":"ask_step","engagement":"strong","step":{"id":"step_company","title":"What company are you from?","inputType":"text"}}',
-    // Turn 3 — ask for pain point
-    '{"decision":"ask_step","engagement":"strong","step":{"id":"step_pain","title":"What problem are you trying to solve?","description":"Be as specific as you like.","inputType":"text"}}',
-    // Turn 4 — ask for timeline
-    '{"decision":"ask_step","engagement":"strong","step":{"id":"step_timeline","title":"When are you looking to get started?","inputType":"choice","choices":[{"id":"immediate","label":"Immediately"},{"id":"1-3 months","label":"1–3 months"},{"id":"3-6 months","label":"3–6 months"},{"id":"6+","label":"6+ months"}]}}',
-    // Turn 5 — resolve branch
-    '{"decision":"resolve_branch","engagement":"strong","branch_resolution":{"branch_id":"lead_split","option_id":"book_call","rationale":"Qualified lead with clear brief and immediate timeline."}}',
-    // Turn 6 — complete
-    '{"decision":"complete","engagement":"strong","outcome":{"outcome_id":"book_call","summary":"Qualified senior decision-maker with clear brief and immediate timeline."}}',
+    // Turn 2 — ask for email
+    '{"decision":"ask_step","engagement":"strong","step":{"id":"step_email","title":"What\'s your email?","inputType":"text"}}',
+    // Turn 3 — ask for details
+    '{"decision":"ask_step","engagement":"strong","step":{"id":"step_details","title":"Tell me more about your needs","description":"Be as specific as you like.","inputType":"text"}}',
+    // Turn 4 — ask for preference
+    '{"decision":"ask_step","engagement":"strong","step":{"id":"step_preference","title":"What\'s most important to you?","inputType":"choice","choices":[{"id":"option1","label":"Option 1"},{"id":"option2","label":"Option 2"},{"id":"option3","label":"Option 3"}]}}',
   ];
 
   @override
@@ -42,9 +73,18 @@ class WorkbenchMockLlmClient extends LlmClient {
     required String model,
     double temperature = 0.7,
   }) {
-    final index = _callCount < _responses.length ? _callCount : _responses.length - 1;
+    final scenario = _detectScenario(systemPrompt);
+    String response;
+    
+    if (_callCount < _genericSteps.length) {
+      // Use generic steps for the first few interactions
+      response = _genericSteps[_callCount];
+    } else {
+      // Use scenario-specific completion
+      response = _getCompletionForScenario(scenario);
+    }
+    
     _callCount++;
-    final response = _responses[index];
     return Stream.fromFuture(
       Future.delayed(_delay, () => response),
     );
