@@ -8,10 +8,14 @@
 // It wraps the emitter call with:
 //   1. A human-readable summary built from [FormResult] (see "Summary format"
 //      below).
-//   2. A 5-second timeout on the *first* chunk — if no data arrives within
-//      that window the subscription is cancelled and a [TimeoutException] is
-//      emitted as a stream error. Subsequent chunks are NOT timeout-bounded
-//      once streaming has started.
+//   2. A timeout on the *first* chunk — if no data arrives within that window
+//      the subscription is cancelled and a [TimeoutException] is emitted as a
+//      stream error. Subsequent chunks are NOT timeout-bounded once streaming
+//      has started. In practice, the bundled [LlmClient] implementations
+//      ([VertexDirectClient], [GeminiApiClient]) buffer the entire HTTP
+//      response and yield a single chunk at the end, so this timeout is
+//      effectively a total-call deadline — the default is sized to cover
+//      realistic gemini-2.5-flash latency for structured-output calls.
 //   3. Pass-through propagation of any error from the emitter — the loader
 //      does not swallow errors. It emits them as stream errors so the renderer
 //      can trigger its v1 fallback.
@@ -70,17 +74,18 @@ import '../registry/handoff_registry.dart';
 ///
 /// Wraps [A2uiOutcomeEmitter.emit] with:
 /// - A human-readable summary derived from [FormResult].
-/// - A configurable timeout on the first chunk (defaults to 5 seconds per
-///   spec §4.5).
+/// - A configurable timeout on the first chunk (defaults to 30 seconds —
+///   sized to cover realistic gemini-2.5-flash latency since the bundled
+///   LLM clients buffer the entire HTTP response before yielding).
 /// - Pass-through error propagation (no swallowing).
 ///
 /// The resulting [Stream<String>] is intended to be passed directly to
 /// [A2uiOutcomeRenderer.a2uiMessageStream].
 class A2uiOutcomeLoader {
-  /// Creates an [A2uiOutcomeLoader] with the spec-mandated 5-second
+  /// Creates an [A2uiOutcomeLoader] with the default 30-second
   /// first-chunk timeout.
   A2uiOutcomeLoader({required this.emitter})
-      : firstChunkTimeout = const Duration(seconds: 5);
+      : firstChunkTimeout = const Duration(seconds: 30);
 
   /// Creates an [A2uiOutcomeLoader] with a custom [firstChunkTimeout].
   ///
