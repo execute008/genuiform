@@ -66,6 +66,26 @@ class _ErrorLlmClient extends LlmClient {
   }
 }
 
+/// An [LlmClient] that yields a fixed list of [_deltas] in order, simulating
+/// the post-streaming-refactor [VertexDirectClient]/[GeminiApiClient] contract
+/// where multiple deltas arrive over the lifetime of a single generate() call.
+class _StreamingLlmClient extends LlmClient {
+  _StreamingLlmClient(this._deltas);
+
+  final List<String> _deltas;
+
+  @override
+  Stream<String> generate({
+    required String systemPrompt,
+    required List<Message> messages,
+    required Map<String, dynamic> responseSchema,
+    required String model,
+    double temperature = 0.7,
+  }) {
+    return Stream<String>.fromIterable(_deltas);
+  }
+}
+
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 void main() {
@@ -311,6 +331,55 @@ void main() {
 
         // The same object should propagate — no wrapping.
         expect(identical(caught, original), isTrue);
+      });
+    });
+
+    // ── Streaming: multiple deltas from upstream ─────────────────────────────
+    group('accumulates deltas from a streaming LlmClient', () {
+      test('yields exactly two envelopes when the response arrives as N deltas',
+          () async {
+        // Slice the valid response into 4 roughly-equal chunks to simulate
+        // SSE deltas arriving over time. The emitter must accumulate them
+        // before parsing.
+        final full = _kValidVertexResponse;
+        final chunkSize = (full.length / 4).ceil();
+        final deltas = <String>[
+          for (int i = 0; i < full.length; i += chunkSize)
+            full.substring(i, (i + chunkSize).clamp(0, full.length)),
+        ];
+        expect(deltas.length, greaterThan(1),
+            reason: 'Test must exercise multi-delta path');
+        expect(deltas.join(), equals(full),
+            reason: 'Deltas must concatenate back to the full payload');
+
+        final client = _StreamingLlmClient(deltas);
+        final emitter = A2uiOutcomeEmitter(client: client);
+
+        final chunks = await emitter
+            .emit(outcomeId: 'book_call', handoff: null, summary: 's')
+            .toList();
+
+        expect(chunks, hasLength(2));
+        final first = jsonDecode(chunks[0]) as Map<String, dynamic>;
+        final second = jsonDecode(chunks[1]) as Map<String, dynamic>;
+        expect(first, contains('createSurface'));
+        expect(second, contains('updateComponents'));
+      });
+
+      test('does not throw on partial-JSON intermediate deltas', () async {
+        // Each individual delta is invalid JSON on its own; only the
+        // concatenation parses. The current per-chunk-jsonDecode emitter
+        // throws SchemaError on the very first delta.
+        final deltas = ['{"createSur', 'face":{"surfaceId":"s","catalogId":"c","sendDataModel":false},'
+            '"updateComponents":{"surfaceId":"s","components":[]}}'];
+        final client = _StreamingLlmClient(deltas);
+        final emitter = A2uiOutcomeEmitter(client: client);
+
+        final chunks = await emitter
+            .emit(outcomeId: 'x', handoff: null, summary: '')
+            .toList();
+
+        expect(chunks, hasLength(2));
       });
     });
 
