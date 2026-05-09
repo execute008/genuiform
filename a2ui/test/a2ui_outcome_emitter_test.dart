@@ -22,7 +22,7 @@ import 'package:genuiform_a2ui/genuiform_a2ui.dart';
 /// Minimal valid Vertex response payload: a single JSON object with both
 /// `createSurface` and `updateComponents` top-level keys.
 ///
-/// Matches the Phase 1 schema design (a2uiOutcomeResponseSchema).
+/// Matches the schema produced by [a2uiOutcomeResponseJsonSchema].
 const String _kValidVertexResponse = '''
 {
   "createSurface": {
@@ -56,7 +56,8 @@ class _ErrorLlmClient extends LlmClient {
   Stream<String> generate({
     required String systemPrompt,
     required List<Message> messages,
-    required Map<String, dynamic> responseSchema,
+    Map<String, dynamic>? responseSchema,
+    Map<String, dynamic>? responseJsonSchema,
     required String model,
     double temperature = 0.7,
   }) {
@@ -65,7 +66,7 @@ class _ErrorLlmClient extends LlmClient {
 }
 
 /// An [LlmClient] that yields a fixed list of [_deltas] in order, simulating
-/// the post-streaming-refactor [VertexDirectClient]/[GeminiApiClient] contract
+/// the post-streaming-refactor [GeminiApiClient]/[VertexProxyClient] contract
 /// where multiple deltas arrive over the lifetime of a single generate() call.
 class _StreamingLlmClient extends LlmClient {
   _StreamingLlmClient(this._deltas);
@@ -76,7 +77,8 @@ class _StreamingLlmClient extends LlmClient {
   Stream<String> generate({
     required String systemPrompt,
     required List<Message> messages,
-    required Map<String, dynamic> responseSchema,
+    Map<String, dynamic>? responseSchema,
+    Map<String, dynamic>? responseJsonSchema,
     required String model,
     double temperature = 0.7,
   }) {
@@ -129,7 +131,7 @@ void main() {
         expect(inv.systemPrompt, contains('book_call'));
       });
 
-      test('responseSchema matches a2uiOutcomeResponseSchema()', () async {
+      test('uses responseJsonSchema (not legacy responseSchema)', () async {
         final fake = FakeLlmClient(
           scriptedResponses: [_kValidVertexResponse],
         );
@@ -139,13 +141,15 @@ void main() {
             .emit(outcomeId: 'x', handoff: null, summary: '')
             .toList();
 
-        final capturedSchema = fake.invocations.first.responseSchema;
-        final expectedSchema = a2uiOutcomeResponseSchema();
-
-        // Compare serialised form so nested map equality is deep.
+        final inv = fake.invocations.first;
+        // The emitter must use the newer `responseJsonSchema` field, which
+        // accepts oneOf and additionalProperties — needed to express the
+        // discriminated component union without unbounded slots.
+        expect(inv.responseSchema, isNull);
+        expect(inv.responseJsonSchema, isNotNull);
         expect(
-          jsonEncode(capturedSchema),
-          equals(jsonEncode(expectedSchema)),
+          jsonEncode(inv.responseJsonSchema),
+          equals(jsonEncode(a2uiOutcomeResponseJsonSchema())),
         );
       });
 
@@ -176,6 +180,44 @@ void main() {
             .toList();
 
         expect(fake.invocations.first.model, equals('gemini-2.0-pro'));
+      });
+
+      // Regression: workbench (and example) used to wire the toolbar model
+      // picker straight into the A2UI emitter. The default picker value is
+      // `gemini-flash-latest`, which currently routes to the gemini-3 preview
+      // line — and that variant rejects `generationConfig.responseJsonSchema`
+      // on AI Studio v1beta with a generic HTTP 400 INVALID_ARGUMENT. Symptom
+      // was "A2uiOutcomeRenderer: stream error — falling back to v1 tree.
+      // SchemaError: Gemini API rejected request (HTTP 400)". The form path
+      // was unaffected because it uses the legacy `responseSchema` field.
+      //
+      // Reject `-latest` aliases at construction so the misuse is loud and
+      // immediate instead of surfacing as a confusing 400 mid-flow.
+      test('rejects -latest model aliases that do not support responseJsonSchema',
+          () {
+        final fake = FakeLlmClient(scriptedResponses: [_kValidVertexResponse]);
+
+        expect(
+          () => A2uiOutcomeEmitter(client: fake, model: 'gemini-flash-latest'),
+          throwsA(
+            isA<ArgumentError>().having(
+              (e) => e.toString(),
+              'message',
+              contains('responseJsonSchema'),
+            ),
+          ),
+        );
+        expect(
+          () => A2uiOutcomeEmitter(
+            client: fake,
+            model: 'gemini-flash-lite-latest',
+          ),
+          throwsA(isA<ArgumentError>()),
+        );
+        expect(
+          () => A2uiOutcomeEmitter(client: fake, model: 'gemini-pro-latest'),
+          throwsA(isA<ArgumentError>()),
+        );
       });
     });
 
