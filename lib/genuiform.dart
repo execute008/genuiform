@@ -77,6 +77,10 @@ export 'src/llm/llm_client.dart';
 // VertexDirectClient — direct Vertex AI REST transport (dev/server-side only).
 export 'src/llm/vertex_direct_client.dart';
 
+// GeminiApiClient — public Gemini REST transport using a static AI Studio key
+// (dev/server-side only).
+export 'src/llm/gemini_api_client.dart';
+
 // VertexProxyClient — Firebase Function proxy transport (stub; v0.4).
 export 'src/llm/vertex_proxy_client.dart';
 
