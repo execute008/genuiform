@@ -46,7 +46,7 @@ class _HomeScreenState extends State<HomeScreen> {
   /// tree, with hand-crafted fallback) or via a SnackBar.
   late final ValueNotifier<bool> _useA2ui;
 
-  static const _model = 'gemini-2.5-flash';
+  static const _model = 'gemini-flash-latest';
 
   @override
   void initState() {
@@ -490,7 +490,7 @@ class _SplitDemoTab extends StatelessWidget {
       outcomes: outcomes,
       leftClient: engagedScript,
       rightClient: tiredScript,
-      model: 'gemini-2.5-flash',
+      model: 'gemini-flash-latest',
       leftLabel: 'Engaged CTO (4 questions)',
       rightLabel: 'Tired founder (2 questions)',
     );
