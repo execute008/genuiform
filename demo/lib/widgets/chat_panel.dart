@@ -16,11 +16,11 @@ class ChatPanel extends StatefulWidget {
 class _ChatPanelState extends State<ChatPanel> {
   final TextEditingController _composer = TextEditingController();
   final ScrollController _scroll = ScrollController();
-  static const _suggestions = [
-    'a medical intake form for a clinic',
-    '3-step onboarding for a fintech app',
-    'NPS feedback that adapts to engagement',
-  ];
+  // static const _suggestions = [  // Removed unused field
+  //   'a medical intake form for a clinic',
+  //   '3-step onboarding for a fintech app',
+  //   'NPS feedback that adapts to engagement',
+  // ];
 
   @override
   void initState() {

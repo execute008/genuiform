@@ -1,4 +1,4 @@
-name: genuiform
+name: genuiform_demo
 description: GenUIForm workbench — adaptive form generator with persona-driven preview.
 publish_to: "none"
 version: 0.1.0+1
@@ -13,9 +13,28 @@ dependencies:
   google_fonts: ^6.2.1
   google_generative_ai: ^0.4.0
   shared_preferences: ^2.2.0
+  flutter_svg: ^2.0.0
+  
+  # Add genuiform dependencies
+  genuiform:
+    path: ../
+  genuiform_a2ui:
+    path: ../a2ui
+    
+  # Code editor dependencies
+  re_editor: ^0.8.0
+  re_highlight: ^0.0.3
+  archive: ^4.0.0
+  web: ^1.1.0
 
 dev_dependencies:
   flutter_lints: ^4.0.0
 
+# Override for re_editor compatibility
+dependency_overrides:
+  isolate_manager: ^6.3.2
+
 flutter:
   uses-material-design: true
+  assets:
+    - assets/icon.svg

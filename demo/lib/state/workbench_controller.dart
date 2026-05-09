@@ -1,13 +1,18 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:genuiform/genuiform.dart';
 
 import '../models/chat_message.dart';
 import '../models/persona.dart';
-import '../models/scenario.dart';
+import '../models/scenario.dart' as DemoScenario;
 import '../services/gemini_service.dart';
+import '../src/parser/parse_dsl.dart';
+import '../src/llm/workbench_mock_llm_client.dart';
+import '../src/scenarios/scenarios.dart';
+import '../src/scenarios/scenario.dart' as WorkbenchScenario;
 
-/// Centralized state for the workbench. Owns scenario, persona, and chat
-/// history; simulates the Gemini → contract pipeline.
+/// Enhanced workbench controller with DSL editing and LLM client support.
+/// Combines demo UI with workbench functionality.
 class WorkbenchController extends ChangeNotifier {
   String _scenarioKey = 'medical';
   String _activePersonaId = 'p1';
@@ -15,6 +20,32 @@ class WorkbenchController extends ChangeNotifier {
   bool _debug = true;
   int _personaCount = 4;
   String _streamingText = '';
+  
+  // DSL Editor state
+  bool _showDslEditor = false;
+  String _currentScenarioId = 'lead_qualification';
+  late String _dsl;
+  late ParseResult _parseResult;
+  late ParseResult _committedParseResult;
+  int _formKey = 0;
+  Timer? _debounce;
+  Timer? _commitDebounce;
+  // String _lastSyncedDsl = '';  // Removed unused field
+  
+  // LLM Client configuration
+  static const _envGeminiKey = String.fromEnvironment('GEMINI_API_KEY');
+  static const _envApiKey = String.fromEnvironment('VERTEX_API_KEY');
+  static const _envProjectId = String.fromEnvironment('VERTEX_PROJECT_ID');
+  static const _envLocation = String.fromEnvironment('VERTEX_LOCATION', defaultValue: 'europe-west1');
+  static const _useMock = bool.fromEnvironment('USE_MOCK');
+  static const _initialModel = 'gemini-flash-latest';
+  
+  late final ValueNotifier<String> _geminiKey;
+  late final ValueNotifier<String> _apiKey;
+  late final ValueNotifier<String> _projectId;
+  late final ValueNotifier<String> _model;
+  
+  static const Duration _kCommitDebounce = Duration(milliseconds: 2000);
   
   final GeminiService _geminiService = GeminiService();
 
@@ -36,6 +67,25 @@ class WorkbenchController extends ChangeNotifier {
     ),
   ];
 
+  // Getters for DSL functionality
+  bool get showDslEditor => _showDslEditor;
+  String get currentScenarioId => _currentScenarioId;
+  String get dsl => _dsl;
+  ParseResult get parseResult => _parseResult;
+  ParseResult get committedParseResult => _committedParseResult;
+  int get formKey => _formKey;
+  ValueNotifier<String> get model => _model;
+  
+  bool get hasGemini => _geminiKey.value.isNotEmpty;
+  bool get hasVertex => _apiKey.value.isNotEmpty && _projectId.value.isNotEmpty;
+  
+  static const candidateModels = <String>[
+    'gemini-flash-latest',
+    'gemini-pro-latest', 
+    'gemini-2.5-flash',
+    'gemini-2.5-pro',
+  ];
+
   static const Map<String, List<String>> _followups = {
     'medical': [
       'Make consent more prominent',
@@ -54,7 +104,7 @@ class WorkbenchController extends ChangeNotifier {
   };
 
   String get scenarioKey => _scenarioKey;
-  Scenario get scenario => ScenarioLibrary.byKey(_scenarioKey);
+  DemoScenario.Scenario get scenario => DemoScenario.ScenarioLibrary.byKey(_scenarioKey);
   String get activePersonaId => _activePersonaId;
   Persona? get activePersona {
     final list = PersonaLibrary.byScenario[_scenarioKey] ?? [];
@@ -79,6 +129,19 @@ class WorkbenchController extends ChangeNotifier {
   
   Future<void> init() async {
     await _geminiService.init();
+    
+    // Initialize LLM client configuration
+    _geminiKey = ValueNotifier(_envGeminiKey);
+    _apiKey = ValueNotifier(_envApiKey);
+    _projectId = ValueNotifier(_envProjectId);
+    _model = ValueNotifier(_initialModel);
+    
+    // Initialize DSL with first scenario
+    _dsl = kScenarios.first.dsl;
+    _currentScenarioId = kScenarios.first.id;
+    _parseResult = parseDsl(_dsl);
+    _committedParseResult = _parseResult;
+    
     notifyListeners();
   }
 
@@ -115,6 +178,27 @@ class WorkbenchController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void addMockMessage(String text) {
+    if (text.trim().isEmpty) return;
+    _history.add(ChatMessage(role: ChatRole.user, text: text.trim()));
+    
+    // Add a simple mock response
+    Future.delayed(const Duration(milliseconds: 500), () {
+      _history.add(const ChatMessage(
+        role: ChatRole.ai,
+        text: "I'll help you create that form. Switch to Code view to see and edit the DSL, then click Run to generate the form.",
+        followups: [
+          'Show me an example',
+          'Explain the DSL syntax',
+          'Add more fields',
+        ],
+      ));
+      notifyListeners();
+    });
+    
+    notifyListeners();
+  }
+  
   Future<void> submitPrompt(String text) async {
     if (text.trim().isEmpty || _generating) return;
     _history.add(ChatMessage(role: ChatRole.user, text: text.trim()));
@@ -133,7 +217,7 @@ class WorkbenchController extends ChangeNotifier {
         }
         
         // Infer scenario from response
-        final inferred = ScenarioLibrary.inferKey(text);
+        final inferred = DemoScenario.ScenarioLibrary.inferKey(text);
         _scenarioKey = inferred;
         final personas = PersonaLibrary.byScenario[inferred];
         if (personas != null && personas.isNotEmpty) {
@@ -155,14 +239,14 @@ class WorkbenchController extends ChangeNotifier {
       // Fallback to simulation
       await Future<void>.delayed(const Duration(milliseconds: 1400));
 
-      final inferred = ScenarioLibrary.inferKey(text);
+      final inferred = DemoScenario.ScenarioLibrary.inferKey(text);
       _scenarioKey = inferred;
       final personas = PersonaLibrary.byScenario[inferred];
       if (personas != null && personas.isNotEmpty) {
         _activePersonaId = personas.first.id;
       }
 
-      final scenario = ScenarioLibrary.byKey(inferred);
+      final scenario = DemoScenario.ScenarioLibrary.byKey(inferred);
       final reply =
           "Here's a draft for ${scenario.label}. The form will branch to one of: ${scenario.paths.join(', ')}.";
 
@@ -176,5 +260,73 @@ class WorkbenchController extends ChangeNotifier {
     _generating = false;
     _streamingText = '';
     notifyListeners();
+  }
+  
+  // DSL Editor functionality
+  void toggleDslEditor() {
+    _showDslEditor = !_showDslEditor;
+    notifyListeners();
+  }
+  
+  void onDslChanged(String newDsl) {
+    _dsl = newDsl;
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 250), () {
+      final result = parseDsl(_dsl);
+      _parseResult = result;
+      notifyListeners();
+      
+      _commitDebounce?.cancel();
+      if (result.isClean) {
+        _commitDebounce = Timer(_kCommitDebounce, () {
+          if (_parseResult.isClean && !identical(_parseResult, _committedParseResult)) {
+            _committedParseResult = _parseResult;
+            notifyListeners();
+          }
+        });
+      }
+    });
+  }
+  
+  void onScenarioPicked(String scenarioId) {
+    final scenario = kScenarios.firstWhere((s) => s.id == scenarioId);
+    _debounce?.cancel();
+    _commitDebounce?.cancel();
+    _currentScenarioId = scenario.id;
+    _dsl = scenario.dsl;
+    _parseResult = parseDsl(_dsl);
+    _committedParseResult = _parseResult;
+    _formKey++;
+    notifyListeners();
+  }
+  
+  void runOrReset() {
+    _debounce?.cancel();
+    _commitDebounce?.cancel();
+    _parseResult = parseDsl(_dsl);
+    _committedParseResult = _parseResult;
+    _formKey++;
+    notifyListeners();
+  }
+  
+  LlmClient buildClient() {
+    if (_useMock) return WorkbenchMockLlmClient();
+    if (hasGemini) return GeminiApiClient(apiKey: _geminiKey.value);
+    return VertexDirectClient(
+      apiKey: _apiKey.value,
+      projectId: _projectId.value,
+      location: _envLocation,
+    );
+  }
+  
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _commitDebounce?.cancel();
+    _geminiKey.dispose();
+    _apiKey.dispose();
+    _projectId.dispose();
+    _model.dispose();
+    super.dispose();
   }
 }
