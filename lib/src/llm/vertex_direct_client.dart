@@ -18,6 +18,13 @@ import '../models/message.dart';
 /// static API keys the same way as other Google APIs — the value is forwarded
 /// as `Authorization: Bearer <apiKey>`.
 ///
+/// ### Streaming
+///
+/// The endpoint is called with `?alt=sse` so the response is a Server-Sent
+/// Events stream. [generate] yields one text delta per SSE event as bytes
+/// arrive — consumers must concatenate the deltas to reconstruct the final
+/// JSON.
+///
 /// Example:
 /// ```dart
 /// final client = VertexDirectClient(
@@ -25,13 +32,16 @@ import '../models/message.dart';
 ///   projectId: 'my-gcp-project',
 ///   location: 'europe-west1',
 /// );
-/// final stream = client.generate(
+/// final buffer = StringBuffer();
+/// await for (final delta in client.generate(
 ///   systemPrompt: systemPrompt,
 ///   messages: session.history.map((a) => a.message).toList(),
 ///   responseSchema: generativeStrategyResponseSchema(),
 ///   model: 'gemini-2.5-flash',
-/// );
-/// final json = await stream.first;
+/// )) {
+///   buffer.write(delta);
+/// }
+/// final json = jsonDecode(buffer.toString());
 /// ```
 class VertexDirectClient extends LlmClient {
   /// The OAuth access token (or API key for testing).
@@ -47,8 +57,9 @@ class VertexDirectClient extends LlmClient {
 
   /// Creates a [VertexDirectClient].
   ///
-  /// Inject [httpClient] to use a test double (e.g. `MockClient` from
-  /// `package:http/testing.dart`). If omitted, a real [http.Client] is used.
+  /// Inject [httpClient] to use a test double (e.g. `MockClient.streaming`
+  /// from `package:http/testing.dart`). If omitted, a real [http.Client] is
+  /// used.
   VertexDirectClient({
     required this.apiKey,
     required this.projectId,
@@ -56,13 +67,14 @@ class VertexDirectClient extends LlmClient {
     http.Client? httpClient,
   }) : _httpClient = httpClient ?? http.Client();
 
-  /// Builds the Vertex AI streamGenerateContent URL for [model].
+  /// Builds the Vertex AI streamGenerateContent URL for [model], with
+  /// `?alt=sse` so the response is delivered as Server-Sent Events.
   Uri _buildUri(String model) {
     return Uri.parse(
       'https://$location-aiplatform.googleapis.com/v1/projects/$projectId'
       '/locations/$location/publishers/google/models/$model'
       ':streamGenerateContent',
-    );
+    ).replace(queryParameters: {'alt': 'sse'});
   }
 
   /// Maps a [Message] to Vertex AI's `contents[n]` payload shape.
@@ -86,8 +98,8 @@ class VertexDirectClient extends LlmClient {
 
   /// Parses the `Retry-After` header value into a [Duration], or returns
   /// `null` if the header is absent or not a valid integer.
-  Duration? _parseRetryAfter(http.Response response) {
-    final raw = response.headers['retry-after'];
+  Duration? _parseRetryAfter(Map<String, String> headers) {
+    final raw = headers['retry-after'];
     if (raw == null) return null;
     final seconds = int.tryParse(raw);
     if (seconds == null) return null;
@@ -102,8 +114,6 @@ class VertexDirectClient extends LlmClient {
     required String model,
     double temperature = 0.7,
   }) {
-    // Using async* so we can yield/throw naturally without StreamController
-    // boilerplate.
     return _generateAsync(
       systemPrompt: systemPrompt,
       messages: messages,
@@ -136,16 +146,14 @@ class VertexDirectClient extends LlmClient {
       },
     };
 
-    http.Response response;
+    final request = http.Request('POST', uri);
+    request.headers['Authorization'] = 'Bearer $apiKey';
+    request.headers['Content-Type'] = 'application/json';
+    request.body = jsonEncode(payload);
+
+    http.StreamedResponse response;
     try {
-      response = await _httpClient.post(
-        uri,
-        headers: {
-          'Authorization': 'Bearer $apiKey',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode(payload),
-      );
+      response = await _httpClient.send(request);
     } on SocketException catch (e) {
       throw NetworkError('Socket error: ${e.message}', cause: e);
     } on http.ClientException catch (e) {
@@ -156,75 +164,84 @@ class VertexDirectClient extends LlmClient {
       throw UnknownError('Unexpected error during HTTP request', cause: e);
     }
 
-    // Map HTTP error status codes to LlmClientError subtypes.
-    if (response.statusCode == 401 || response.statusCode == 403) {
-      throw AuthError(
-        'Vertex AI returned HTTP ${response.statusCode}: ${response.body}',
-      );
-    }
-
-    if (response.statusCode == 429) {
-      throw RateLimitError(
-        'Vertex AI rate limit exceeded (HTTP 429)',
-        retryAfter: _parseRetryAfter(response),
-      );
-    }
-
-    if (response.statusCode >= 500) {
-      throw NetworkError(
-        'Vertex AI server error (HTTP ${response.statusCode}): ${response.body}',
-      );
-    }
-
-    // Parse the streamed JSON array response.
-    // Vertex streamGenerateContent returns the full response as a JSON array
-    // of chunk objects. We parse the array and concatenate the text from all
-    // parts to reconstruct the full JSON output.
-    List<dynamic> chunks;
-    try {
-      chunks = jsonDecode(response.body) as List<dynamic>;
-    } catch (e) {
-      throw SchemaError(
-        'Failed to parse Vertex AI response envelope as JSON array: $e',
-      );
-    }
-
-    // Concatenate all text parts across all chunks.
-    final buffer = StringBuffer();
-    for (final chunk in chunks) {
-      try {
-        final chunkMap = chunk as Map<String, dynamic>;
-        final candidates = chunkMap['candidates'] as List<dynamic>;
-        for (final candidate in candidates) {
-          final content =
-              (candidate as Map<String, dynamic>)['content'] as Map<String, dynamic>;
-          final parts = content['parts'] as List<dynamic>;
-          for (final part in parts) {
-            final text = (part as Map<String, dynamic>)['text'] as String;
-            buffer.write(text);
-          }
-        }
-      } catch (e) {
-        throw SchemaError(
-          'Failed to extract text from Vertex AI response chunk: $e',
+    final status = response.statusCode;
+    if (status != 200) {
+      final body = await response.stream.bytesToString();
+      if (status == 401 || status == 403) {
+        throw AuthError('Vertex AI returned HTTP $status: $body');
+      }
+      if (status == 429) {
+        throw RateLimitError(
+          'Vertex AI rate limit exceeded (HTTP 429)',
+          retryAfter: _parseRetryAfter(response.headers),
         );
       }
-    }
-
-    final accumulated = buffer.toString();
-
-    // Validate that the accumulated buffer is parseable JSON before emitting.
-    // If not, the LLM returned non-JSON content despite the responseMimeType
-    // constraint — surface as SchemaError.
-    try {
-      jsonDecode(accumulated);
-    } catch (e) {
+      if (status >= 500) {
+        throw NetworkError(
+          'Vertex AI server error (HTTP $status): $body',
+        );
+      }
       throw SchemaError(
-        'Vertex AI response text is not valid JSON: $e\n'
-        'Raw text (first 500 chars): ${accumulated.substring(0, accumulated.length.clamp(0, 500))}',
+        'Vertex AI rejected request (HTTP $status): $body',
       );
     }
 
-    yield accumulated;
+    // Parse the Server-Sent Events stream incrementally. Each `data: {...}`
+    // line is one Vertex chunk; we extract its text part and yield it as a
+    // delta. Consumers concatenate deltas to reconstruct the full JSON.
+    final lines = response.stream
+        .transform(utf8.decoder)
+        .transform(const LineSplitter());
+
+    await for (final line in lines) {
+      if (line.isEmpty) continue;
+      if (line.startsWith(':')) continue; // SSE comment / keep-alive
+      if (!line.startsWith('data:')) continue;
+
+      final data = line.substring(5).trim();
+      if (data.isEmpty) continue;
+
+      Map<String, dynamic> chunkMap;
+      try {
+        chunkMap = jsonDecode(data) as Map<String, dynamic>;
+      } catch (e) {
+        throw SchemaError(
+          'Failed to parse Vertex SSE event as JSON: $e',
+        );
+      }
+
+      final delta = _extractTextDelta(chunkMap);
+      if (delta.isNotEmpty) {
+        yield delta;
+      }
+    }
+  }
+
+  /// Extracts concatenated text from `candidates[*].content.parts[*].text`
+  /// in a single Vertex chunk. Returns an empty string if no text parts are
+  /// present (e.g. safety-rating-only events).
+  static String _extractTextDelta(Map<String, dynamic> chunkMap) {
+    try {
+      final candidates = chunkMap['candidates'] as List<dynamic>?;
+      if (candidates == null || candidates.isEmpty) return '';
+
+      final buffer = StringBuffer();
+      for (final candidate in candidates) {
+        final content = (candidate as Map<String, dynamic>)['content']
+            as Map<String, dynamic>?;
+        if (content == null) continue;
+        final parts = content['parts'] as List<dynamic>?;
+        if (parts == null) continue;
+        for (final part in parts) {
+          final text = (part as Map<String, dynamic>)['text'] as String?;
+          if (text != null) buffer.write(text);
+        }
+      }
+      return buffer.toString();
+    } catch (e) {
+      throw SchemaError(
+        'Failed to extract text from Vertex SSE event: $e',
+      );
+    }
   }
 }

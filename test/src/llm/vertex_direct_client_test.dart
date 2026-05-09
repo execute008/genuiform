@@ -8,20 +8,24 @@ import 'package:genuiform/src/llm/vertex_direct_client.dart';
 import 'package:genuiform/src/llm/llm_client.dart';
 import 'package:genuiform/src/models/message.dart';
 
-/// Builds a well-formed Vertex streamGenerateContent response wrapping [text].
-String _vertexResponse(String text) => jsonEncode([
+/// Builds a single Vertex SSE event line wrapping [text] as the part text.
+String _sseEvent(String text) {
+  final payload = jsonEncode({
+    'candidates': [
       {
-        'candidates': [
-          {
-            'content': {
-              'parts': [
-                {'text': text},
-              ],
-            },
-          },
-        ],
+        'content': {
+          'parts': [
+            {'text': text},
+          ],
+        },
       },
-    ]);
+    ],
+  });
+  return 'data: $payload\n\n';
+}
+
+/// Convenience wrapper: a 200 SSE response with a single event for [text].
+String _vertexResponse(String text) => _sseEvent(text);
 
 VertexDirectClient _makeClient(MockClientHandler handler) =>
     VertexDirectClient(
@@ -54,13 +58,16 @@ void main() {
           .first;
 
       expect(
-        capturedUri.toString(),
-        startsWith(
-          'https://europe-west1-aiplatform.googleapis.com/v1/projects/test-proj/'
-          'locations/europe-west1/publishers/google/models/gemini-2.5-flash'
-          ':streamGenerateContent',
-        ),
+        capturedUri.host,
+        'europe-west1-aiplatform.googleapis.com',
       );
+      expect(
+        capturedUri.path,
+        '/v1/projects/test-proj/locations/europe-west1/publishers/google/'
+        'models/gemini-2.5-flash:streamGenerateContent',
+      );
+      // SSE mode is required for incremental streaming.
+      expect(capturedUri.queryParameters['alt'], 'sse');
     });
 
     test('sends Bearer auth header', () async {
@@ -209,7 +216,8 @@ void main() {
       expect(genCfg['responseSchema'], schema);
     });
 
-    test('emits a single complete JSON string from stream', () async {
+    test('yields a single delta when the SSE response has one event',
+        () async {
       final client = _makeClient(
         (request) async => http.Response(
           _vertexResponse('{"decision":"ask_step","engagement":"strong"}'),
@@ -217,60 +225,36 @@ void main() {
         ),
       );
 
-      final result = await client
+      final deltas = await client
           .generate(
             systemPrompt: 'sys',
             messages: [Message(role: MessageRole.user, content: 'hi')],
             responseSchema: {},
             model: 'gemini-2.5-flash',
           )
-          .first;
+          .toList();
 
-      expect(result, '{"decision":"ask_step","engagement":"strong"}');
+      expect(deltas, ['{"decision":"ask_step","engagement":"strong"}']);
     });
 
-    test('buffers multiple chunk texts into a single emission', () async {
-      // Simulate two chunks, each with partial text that together form JSON.
-      final multiChunkResponse = jsonEncode([
-        {
-          'candidates': [
-            {
-              'content': {
-                'parts': [
-                  {'text': '{"hello"'},
-                ],
-              },
-            },
-          ],
-        },
-        {
-          'candidates': [
-            {
-              'content': {
-                'parts': [
-                  {'text': ':1}'},
-                ],
-              },
-            },
-          ],
-        },
-      ]);
+    test('yields one delta per SSE event in the response body', () async {
+      final body = _vertexResponse('{"hello"') + _vertexResponse(':1}');
 
       final client = _makeClient(
-        (request) async => http.Response(multiChunkResponse, 200),
+        (request) async => http.Response(body, 200),
       );
 
-      final result = await client
+      final deltas = await client
           .generate(
             systemPrompt: 'sys',
             messages: [],
             responseSchema: {},
             model: 'gemini-2.5-flash',
           )
-          .first;
+          .toList();
 
-      // Verify the concatenated text is valid JSON.
-      expect(jsonDecode(result), {'hello': 1});
+      expect(deltas, ['{"hello"', ':1}']);
+      expect(jsonDecode(deltas.join()), {'hello': 1});
     });
   });
 
@@ -521,11 +505,10 @@ void main() {
       );
     });
 
-    test('malformed JSON response body maps to SchemaError', () async {
-      // The Vertex response envelope is valid, but the inner text is not JSON.
+    test('malformed SSE event JSON maps to SchemaError', () async {
       final client = _makeClient(
         (request) async => http.Response(
-          _vertexResponse('not valid json {{{'),
+          'data: this-is-not-json\n\n',
           200,
         ),
       );
@@ -541,21 +524,25 @@ void main() {
       );
     });
 
-    test('malformed Vertex envelope maps to SchemaError', () async {
-      // The outer response body itself is not parseable as a Vertex array.
+    test('non-SSE 200 body yields no deltas (consumer detects empty)',
+        () async {
+      // The client is now a transport — it does not validate that the body is
+      // SSE. A 200 response with no `data:` lines simply produces no deltas;
+      // it is the consumer's job to detect "no output" and fail accordingly.
       final client = _makeClient(
         (request) async => http.Response('this is not json at all', 200),
       );
 
-      await expectLater(
-        client.generate(
-          systemPrompt: 'sys',
-          messages: [],
-          responseSchema: {},
-          model: 'gemini-2.5-flash',
-        ),
-        emitsError(isA<SchemaError>()),
-      );
+      final deltas = await client
+          .generate(
+            systemPrompt: 'sys',
+            messages: [],
+            responseSchema: {},
+            model: 'gemini-2.5-flash',
+          )
+          .toList();
+
+      expect(deltas, isEmpty);
     });
 
     test('exception from httpClient maps to NetworkError', () async {
