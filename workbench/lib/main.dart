@@ -47,10 +47,14 @@ class _WorkbenchRootState extends State<_WorkbenchRoot> {
   /// Initial model on first paint. Runtime-mutable via the toolbar dropdown.
   static const _initialModel = 'gemini-flash-latest';
 
+  /// Initial sampling temperature. Runtime-mutable via the toolbar slider.
+  static const _initialTemperature = 0.7;
+
   late final ValueNotifier<String> _geminiKey;
   late final ValueNotifier<String> _apiKey;
   late final ValueNotifier<String> _projectId;
   late final ValueNotifier<String> _model;
+  late final ValueNotifier<double> _temperature;
 
   @override
   void initState() {
@@ -59,6 +63,7 @@ class _WorkbenchRootState extends State<_WorkbenchRoot> {
     _apiKey = ValueNotifier(_envApiKey);
     _projectId = ValueNotifier(_envProjectId);
     _model = ValueNotifier(_initialModel);
+    _temperature = ValueNotifier(_initialTemperature);
   }
 
   @override
@@ -67,6 +72,7 @@ class _WorkbenchRootState extends State<_WorkbenchRoot> {
     _apiKey.dispose();
     _projectId.dispose();
     _model.dispose();
+    _temperature.dispose();
     super.dispose();
   }
 
@@ -89,12 +95,17 @@ class _WorkbenchRootState extends State<_WorkbenchRoot> {
       return AppShell(
         client: _buildClient(),
         model: _model,
+        temperature: _temperature,
         showMockBadge: true,
       );
     }
 
     if (_hasGemini || _hasVertex) {
-      return AppShell(client: _buildClient(), model: _model);
+      return AppShell(
+        client: _buildClient(),
+        model: _model,
+        temperature: _temperature,
+      );
     }
 
     return Scaffold(
@@ -103,7 +114,11 @@ class _WorkbenchRootState extends State<_WorkbenchRoot> {
         listenable: Listenable.merge([_geminiKey, _apiKey, _projectId]),
         builder: (context, _) {
           if (_hasGemini || _hasVertex) {
-            return AppShell(client: _buildClient(), model: _model);
+            return AppShell(
+              client: _buildClient(),
+              model: _model,
+              temperature: _temperature,
+            );
           }
 
           return Center(

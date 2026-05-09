@@ -32,6 +32,7 @@ class A2uiOutcomeEmitter {
   A2uiOutcomeEmitter({
     required this.client,
     this.model = 'gemini-2.5-flash',
+    this.temperature = 0.7,
     this.maxBufferBytes = 256 * 1024,
   }) {
     // The emitter relies on `generationConfig.responseJsonSchema` (full JSON
@@ -55,6 +56,9 @@ class A2uiOutcomeEmitter {
 
   final LlmClient client;
   final String model;
+
+  /// Sampling temperature forwarded to [LlmClient.generate]. Defaults to 0.7.
+  final double temperature;
 
   /// Hard cap on the total bytes accumulated from upstream deltas before the
   /// emitter aborts with a [SchemaError]. Guards against degenerate models
@@ -102,6 +106,7 @@ class A2uiOutcomeEmitter {
       ],
       responseSchema: a2uiOutcomeResponseSchema(),
       model: model,
+      temperature: temperature,
     )) {
       onDelta?.call();
       buffer.write(delta);

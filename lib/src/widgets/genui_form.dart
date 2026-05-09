@@ -58,6 +58,7 @@ class GenuiForm extends StatefulWidget {
     required this.outcomes,
     required this.client,
     required this.model,
+    this.temperature = 0.7,
     this.strategy,
     this.onComplete,
     this.onEscalation,
@@ -83,6 +84,10 @@ class GenuiForm extends StatefulWidget {
 
   /// The Vertex AI model ID string (e.g. `'gemini-2.5-flash'`).
   final String model;
+
+  /// Sampling temperature forwarded to the underlying [FormConfig].
+  /// Defaults to `0.7`.
+  final double temperature;
 
   /// The strategy to use. Defaults to [GenerativeStrategy] when `null`.
   final Strategy? strategy;
@@ -136,6 +141,7 @@ class _GenuiFormState extends State<GenuiForm> {
         outcomes: widget.outcomes,
         client: widget.client,
         model: widget.model,
+        temperature: widget.temperature,
       );
 
   @override
@@ -150,7 +156,8 @@ class _GenuiFormState extends State<GenuiForm> {
         old.posture != widget.posture ||
         old.outcomes != widget.outcomes ||
         !identical(old.client, widget.client) ||
-        old.model != widget.model;
+        old.model != widget.model ||
+        old.temperature != widget.temperature;
 
     if (configChanged) {
       // Hand the new config to the existing controller — it preserves the

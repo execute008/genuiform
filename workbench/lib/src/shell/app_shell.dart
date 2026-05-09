@@ -30,6 +30,7 @@ class AppShell extends StatefulWidget {
   const AppShell({
     required this.client,
     required this.model,
+    required this.temperature,
     this.showMockBadge = false,
     super.key,
   });
@@ -39,10 +40,18 @@ class AppShell extends StatefulWidget {
 
   /// The currently-selected Gemini model. A [ValueNotifier] (not a plain
   /// String) so the toolbar dropdown can swap models at runtime: when the
-  /// value changes, [_AppShellState] rebuilds the A2UI emitter and bumps the
-  /// form key so both the A2UI and form-generation paths pick up the new
-  /// model on the next emit / step.
+  /// value changes, [_AppShellState] bumps the form key so the form-
+  /// generation path picks up the new model on the next step. (The A2UI
+  /// emitter is pinned to a `responseJsonSchema`-capable default.)
   final ValueNotifier<String> model;
+
+  /// Sampling temperature shared between both code paths. A [ValueNotifier]
+  /// so the toolbar slider can change it at runtime: when the value changes,
+  /// [_AppShellState] rebuilds the A2UI emitter (it captures temperature at
+  /// construction) and triggers a [setState] so [FormPreview] re-passes the
+  /// new value down to [GenuiForm], which forwards it to [FormConfig] via
+  /// `rebuildConfig`.
+  final ValueNotifier<double> temperature;
 
   /// Models offered by the toolbar dropdown.
   ///
@@ -135,11 +144,15 @@ class _AppShellState extends State<AppShell> {
   /// with HTTP 400. Letting [A2uiOutcomeEmitter] use its `gemini-2.5-flash`
   /// default keeps that path stable regardless of the picker.
   ///
+  /// Rebuilt when the toolbar temperature slider moves, since the emitter
+  /// captures temperature at construction and forwards it to every
+  /// `client.generate(...)` call.
+  ///
   /// Always constructed (even when the client is a mock), because the gating
   /// decision — whether to actually call through to the emitter — lives in
   /// [FormPreview], which has visibility into both the client type and the
   /// compile-time [_kUseA2uiHandoff] flag.
-  late final A2uiOutcomeEmitter _a2uiEmitter;
+  late A2uiOutcomeEmitter _a2uiEmitter;
 
   @override
   void initState() {
@@ -168,19 +181,30 @@ class _AppShellState extends State<AppShell> {
       _syncUrl();
     }
 
-    // Construct the A2UI emitter once and pin to its default model.
-    // AppShell constructs always; FormPreview gates on client type + flag.
-    _a2uiEmitter = A2uiOutcomeEmitter(client: widget.client);
+    // Construct the A2UI emitter once, pinned to its default model and the
+    // initial temperature. AppShell constructs always; FormPreview gates on
+    // client type + flag.
+    _a2uiEmitter = A2uiOutcomeEmitter(
+      client: widget.client,
+      temperature: widget.temperature.value,
+    );
 
     // Restart the form whenever the user picks a new model from the toolbar
     // dropdown so the next form-generation step picks it up. The A2UI
     // emitter is unaffected by the picker (see _a2uiEmitter docstring).
     widget.model.addListener(_onModelChanged);
+
+    // Rebuild the A2UI emitter (and re-pass the new value to FormPreview via
+    // setState) whenever the toolbar slider moves. Deliberately does NOT
+    // bump the form key — temperature changes only affect future LLM calls,
+    // and tossing the running session for that is too aggressive.
+    widget.temperature.addListener(_onTemperatureChanged);
   }
 
   @override
   void dispose() {
     widget.model.removeListener(_onModelChanged);
+    widget.temperature.removeListener(_onTemperatureChanged);
     _debounce?.cancel();
     _commitDebounce?.cancel();
     _controllerRef.dispose();
@@ -193,6 +217,15 @@ class _AppShellState extends State<AppShell> {
       // is regenerated with the new model. Switching models mid-form is a
       // debug action; losing partial answers is acceptable.
       _formKey++;
+    });
+  }
+
+  void _onTemperatureChanged() {
+    setState(() {
+      _a2uiEmitter = A2uiOutcomeEmitter(
+        client: widget.client,
+        temperature: widget.temperature.value,
+      );
     });
   }
 
@@ -322,6 +355,7 @@ class _AppShellState extends State<AppShell> {
                 outcomes: _committedParseResult.outcomes!,
                 client: widget.client,
                 model: widget.model.value,
+                temperature: widget.temperature.value,
                 handoffMap: handoffMap,
                 onRestartRequested: _runOrReset,
                 emitter: _a2uiEmitter,
@@ -407,6 +441,10 @@ class _AppShellState extends State<AppShell> {
                   );
                 },
               ),
+              const SizedBox(width: 12),
+
+              // ── Temperature slider ────────────────────────────────────────
+              _TemperatureSlider(notifier: widget.temperature),
               const SizedBox(width: 12),
 
               // ── Run button ────────────────────────────────────────────────
@@ -635,6 +673,69 @@ class _ParseStatusFooter extends StatelessWidget {
           ],
         ],
       ),
+    );
+  }
+}
+
+// ── Temperature slider ────────────────────────────────────────────────────────
+
+/// Compact toolbar slider tuning the sampling temperature shared by the form-
+/// generation path and the A2UI outcome emitter.
+///
+/// Range mirrors Gemini's accepted band (0.0–2.0). 0.7 is the system-wide
+/// default; the slider snaps to 0.1 increments so the value is easy to read
+/// at a glance. The current value is rendered to the left of the track so
+/// the user can read it without dragging.
+class _TemperatureSlider extends StatelessWidget {
+  const _TemperatureSlider({required this.notifier});
+
+  final ValueNotifier<double> notifier;
+
+  static const double _min = 0.0;
+  static const double _max = 2.0;
+  static const int _divisions = 20;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return ValueListenableBuilder<double>(
+      valueListenable: notifier,
+      builder: (context, current, _) {
+        return Tooltip(
+          message: 'Sampling temperature (${current.toStringAsFixed(1)}). '
+              'Applies to both form generation and A2UI outcome streams.',
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'T ${current.toStringAsFixed(1)}',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+              SizedBox(
+                width: 140,
+                child: SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    trackHeight: 2,
+                    thumbShape:
+                        const RoundSliderThumbShape(enabledThumbRadius: 6),
+                    overlayShape:
+                        const RoundSliderOverlayShape(overlayRadius: 12),
+                  ),
+                  child: Slider(
+                    value: current.clamp(_min, _max),
+                    min: _min,
+                    max: _max,
+                    divisions: _divisions,
+                    onChanged: (next) => notifier.value = next,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

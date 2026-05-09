@@ -182,6 +182,35 @@ void main() {
         expect(fake.invocations.first.model, equals('gemini-2.0-pro'));
       });
 
+      test('temperature defaults to 0.7', () async {
+        final fake = FakeLlmClient(
+          scriptedResponses: [_kValidVertexResponse],
+        );
+        final emitter = A2uiOutcomeEmitter(client: fake);
+
+        await emitter
+            .emit(outcomeId: 'x', handoff: null, summary: '')
+            .toList();
+
+        expect(fake.invocations.first.temperature, equals(0.7));
+      });
+
+      test('custom temperature is forwarded to LlmClient.generate', () async {
+        final fake = FakeLlmClient(
+          scriptedResponses: [_kValidVertexResponse],
+        );
+        final emitter = A2uiOutcomeEmitter(
+          client: fake,
+          temperature: 0.2,
+        );
+
+        await emitter
+            .emit(outcomeId: 'x', handoff: null, summary: '')
+            .toList();
+
+        expect(fake.invocations.first.temperature, equals(0.2));
+      });
+
       // Regression: workbench (and example) used to wire the toolbar model
       // picker straight into the A2UI emitter. The default picker value is
       // `gemini-flash-latest`, which currently routes to the gemini-3 preview
