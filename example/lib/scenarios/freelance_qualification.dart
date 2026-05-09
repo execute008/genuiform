@@ -1,44 +1,39 @@
 import 'package:genuiform/genuiform.dart';
 
+import '../a2ui/simulated_handoff.dart';
+
 // ---------------------------------------------------------------------------
 // Freelance lead qualification — spec §11.1
 //
 // Fields, constraints, posture, and outcome tree are taken verbatim from
-// spec §11.1. Divergences from the spec's pseudo-Dart are noted inline.
+// spec §11.1.
 // ---------------------------------------------------------------------------
 
-/// Builds the freelance lead-qualification [GenuiForm] per spec §11.1.
+/// Bundle of primitives a [ScenarioPage] needs to run a scenario:
+/// the four core inputs to [GenuiForm] plus a side-table mapping each
+/// terminal `Outcome.id` to a [SimulatedHandoff] for SnackBar / A2UI rendering.
+typedef ScenarioSpec = ({
+  Contract contract,
+  List<Constraint> constraints,
+  Posture posture,
+  OutcomeNode outcomes,
+  Map<String, SimulatedHandoff> handoffMap,
+});
+
+/// Builds the freelance lead-qualification [ScenarioSpec].
 ///
-/// The form uses [Posture.salesDiscovery()] and a three-way [Branch]:
-/// - `book_call`    — qualified lead, budget and decision-maker confirmed.
-/// - `send_proposal` — qualified but needs more information.
-/// - `decline`      — budget/scope mismatch or red flag.
+/// `Outcome.handoff` callbacks are intentionally `null`. The owning
+/// [ScenarioPage] reads `result.reachedOutcome?.id` in `onComplete` and
+/// either shows a SnackBar (deterministic mode) or hands off to
+/// [A2uiOutcomeRenderer] (A2UI mode).
 ///
-/// [showFeedback] is invoked by each [Handoff] callback and by the
-/// [EscalateIf] escalation handler. Wire it to a [ScaffoldMessenger]
-/// snackbar (or a dialog) in the parent widget.
-///
-/// ### Divergences from spec §11.1 pseudo-Dart
-///
-/// - `FieldSpec(type: String, ...)` → `FieldSpec(type: 'String', ...)`
-///   because [FieldSpec.type] is a `String`, not a [Type] object.
-/// - `FieldSpec(type: int, ...)` → `FieldSpec(type: 'int', ...)` — same reason.
-/// - `Branch('lead_split', options: [...])` → `Branch(id: 'lead_split', options: [...])`
-///   — all [OutcomeNode] constructors use named parameters.
-/// - `BranchOption('book_call', criterion: ..., child: ...)` →
-///   `BranchOption(id: 'book_call', criterion: ..., child: ...)`.
-/// - `Handoff(onReached: fn)` → direct `void Function(dynamic)` closure,
-///   because [Handoff] is `typedef Handoff = void Function(dynamic result)`.
-/// - `EscalateIf('...', handler: PoliteEnd())` →
-///   `EscalateIf(trigger: '...', handler: (result) => showFeedback(...))`.
-/// - [Outcome] requires `contractDelta` — passed as `Contract(fields: {})`.
-GenuiForm freelanceQualificationForm({
-  required LlmClient client,
-  required String model,
+/// [showFeedback] is still used for `EscalateIf.handler` callbacks because
+/// escalations terminate before the outcome screen and need their own
+/// feedback channel.
+ScenarioSpec freelanceQualificationSpec({
   required void Function(String message) showFeedback,
 }) {
-  return GenuiForm(
-    // ── Contract ────────────────────────────────────────────────────────────
+  return (
     contract: Contract(fields: {
       'name': const FieldSpec(type: 'String', required: true),
       'company': const FieldSpec(type: 'String', required: true),
@@ -59,8 +54,6 @@ GenuiForm freelanceQualificationForm({
         enumValues: ['decision_maker', 'influencer', 'researcher'],
       ),
     }),
-
-    // ── Constraints ─────────────────────────────────────────────────────────
     constraints: [
       const NeverCollect(fieldOrTopic: 'payment_info'),
       const NeverCollect(fieldOrTopic: 'personal_id_numbers'),
@@ -70,11 +63,7 @@ GenuiForm freelanceQualificationForm({
         handler: (result) => showFeedback('Form ended due to escalation.'),
       ),
     ],
-
-    // ── Posture ─────────────────────────────────────────────────────────────
     posture: Posture.salesDiscovery(),
-
-    // ── Outcomes ────────────────────────────────────────────────────────────
     outcomes: Branch(
       id: 'lead_split',
       options: [
@@ -85,8 +74,7 @@ GenuiForm freelanceQualificationForm({
           child: Outcome(
             id: 'book_call',
             contractDelta: Contract(fields: {}),
-            handoff: (result) =>
-                showFeedback('Booking a call (mock Calendly link)'),
+            handoff: null,
           ),
         ),
         BranchOption(
@@ -96,12 +84,7 @@ GenuiForm freelanceQualificationForm({
           child: Outcome(
             id: 'send_proposal',
             contractDelta: Contract(fields: {}),
-            handoff: (result) {
-              final company =
-                  (result as dynamic).collectedFields['company'] as String? ??
-                      'your company';
-              showFeedback('Email proposal queued for $company');
-            },
+            handoff: null,
           ),
         ),
         BranchOption(
@@ -111,24 +94,24 @@ GenuiForm freelanceQualificationForm({
           child: Outcome(
             id: 'decline',
             contractDelta: Contract(fields: {}),
-            handoff: (result) =>
-                showFeedback('Politely declined — thanks for your time.'),
+            handoff: null,
           ),
         ),
       ],
     ),
-
-    // ── Client & model ───────────────────────────────────────────────────────
-    client: client,
-    model: model,
-
-    // ── Lifecycle callbacks ──────────────────────────────────────────────────
-    onComplete: (result) {
-      // The Outcome.handoff has already fired with the routing-specific message.
-      // onComplete can be used here to e.g. pop the navigator.
-    },
-    onEscalation: (rule) {
-      showFeedback('Escalated: ${rule.trigger}');
+    handoffMap: const {
+      'book_call': SimulatedHandoff(
+        label: 'Book a call (mock Calendly link)',
+        icon: 'calendar_today',
+      ),
+      'send_proposal': SimulatedHandoff(
+        label: 'Email proposal queued',
+        icon: 'mail_outline',
+      ),
+      'decline': SimulatedHandoff(
+        label: 'Politely declined — thanks for your time',
+        icon: 'do_not_disturb',
+      ),
     },
   );
 }

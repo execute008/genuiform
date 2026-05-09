@@ -1,63 +1,35 @@
-import 'package:flutter/foundation.dart';
 import 'package:genuiform/genuiform.dart';
+
+import '../a2ui/simulated_handoff.dart';
+import 'freelance_qualification.dart' show ScenarioSpec;
 
 // ---------------------------------------------------------------------------
 // GymGeist onboarding — spec §11.2
 //
-// Full ladder + branch tree with nutrition split.
-// Uses Posture.supportiveOnboarding().
-//
-// ### Structure
-//
-//   Layer('account_only')            — email + name only; minimal onboarding
-//     └─ Layer('with_workout_plan')  — adds 8 fitness fields
-//          └─ Branch('nutrition_path')
-//               ├─ BranchOption('with_meal_plan')
-//               │    └─ Outcome('full_meal_plan')
-//               ├─ BranchOption('with_macros_only')
-//               │    └─ Outcome('full_macros')
-//               └─ BranchOption('skip_nutrition')
-//                    └─ Outcome('workout_only')
-//
+// Layer('account_only')
+//   └─ Layer('with_workout_plan')
+//        └─ Branch('nutrition_path')
+//             ├─ with_meal_plan   → Outcome('full_meal_plan')
+//             ├─ with_macros_only → Outcome('full_macros')
+//             └─ skip_nutrition   → Outcome('workout_only')
 // ---------------------------------------------------------------------------
 
-/// Builds the GymGeist onboarding [GenuiForm] per spec §11.2.
+/// Builds the GymGeist onboarding [ScenarioSpec] per spec §11.2.
 ///
-/// [showFeedback] is invoked by each [Handoff] and escalation handler.
-///
-/// ### Divergences from spec §11.2 pseudo-Dart
-///
-/// - `FieldSpec(type: List, ...)` → `FieldSpec(type: 'List', ...)`.
-/// - `FieldSpec(type: String, ...)` → `FieldSpec(type: 'String', ...)`.
-/// - `FieldSpec(type: int, ...)` → `FieldSpec(type: 'int', ...)`.
-/// - `Layer('account_only', contractDelta: ..., handoff: ..., next: ...)` →
-///   `Layer(id: 'account_only', contractDelta: ..., handoff: ..., next: ...)`.
-/// - `Branch('nutrition_path', options: [...])` →
-///   `Branch(id: 'nutrition_path', options: [...])`.
-/// - `BranchOption('with_meal_plan', criterion: ..., contractDelta: ..., child: ...)` →
-///   `BranchOption(id: 'with_meal_plan', criterion: ..., contractDelta: ..., child: ...)`.
-/// - `Handoff(onReached: fn)` → direct `void Function(dynamic)` closure.
-/// - `EscalateIf('...', handler: ReferToProfessionalSupport())` →
-///   `EscalateIf(trigger: '...', handler: (result) => showFeedback(...))`.
-/// - `NeverSkip(['height_cm', 'weight_kg'])` → `NeverSkip(fieldIds: ['height_cm', 'weight_kg'])`.
-/// - `MaxSteps(20)` → `MaxSteps(value: 20)`.
-/// - `StopIf('user is under 16')` → `StopIf(trigger: 'user is under 16')`.
-/// - `Layer.contractDelta` for `account_only` holds only `email` and `name`.
-///   The spec shows `Contract(fields: {/* email, name only */})` as a comment;
-///   here it is expanded to the literal two fields.
-GenuiForm gymgeistOnboardingForm({
-  required LlmClient client,
-  required String model,
+/// `Layer.handoff` and `Outcome.handoff` are `null` — the owning
+/// [ScenarioPage] resolves `result.reachedOutcome?.id` and renders SnackBar
+/// or A2UI accordingly. Note: only terminal outcomes are mapped in
+/// [handoffMap]; intermediate `Layer` ids (`account_only`,
+/// `with_workout_plan`) only fire when the form completes early at that
+/// layer, so they get their own entries.
+ScenarioSpec gymgeistOnboardingSpec({
   required void Function(String message) showFeedback,
 }) {
-  return GenuiForm(
-    // ── Contract (root — email + name only) ─────────────────────────────────
+  return (
     contract: Contract(fields: {
       'email': const FieldSpec(type: 'String', required: true),
       'name': const FieldSpec(type: 'String', required: true),
     }),
-
-    // ── Constraints ─────────────────────────────────────────────────────────
     constraints: [
       const NeverSkip(fieldIds: ['height_cm', 'weight_kg']),
       const MaxSteps(value: 20),
@@ -73,28 +45,14 @@ GenuiForm gymgeistOnboardingForm({
             showFeedback('Please seek medical advice before continuing.'),
       ),
     ],
-
-    // ── Posture ─────────────────────────────────────────────────────────────
     posture: Posture.supportiveOnboarding(),
-
-    // ── Outcome tree ─────────────────────────────────────────────────────────
-    //
-    // Layer: account_only
-    //   └─ Layer: with_workout_plan
-    //        └─ Branch: nutrition_path
-    //             ├─ with_meal_plan  → Outcome: full_meal_plan
-    //             ├─ with_macros_only → Outcome: full_macros
-    //             └─ skip_nutrition  → Outcome: workout_only
     outcomes: Layer(
       id: 'account_only',
       contractDelta: Contract(fields: {
         'email': const FieldSpec(type: 'String', required: true),
         'name': const FieldSpec(type: 'String', required: true),
       }),
-      handoff: (result) {
-        debugPrint('[gymgeist] handoff: account_only — $result');
-        showFeedback('Welcome! Your account is ready (minimal setup).');
-      },
+      handoff: null,
       next: Layer(
         id: 'with_workout_plan',
         contractDelta: Contract(fields: {
@@ -119,10 +77,7 @@ GenuiForm gymgeistOnboardingForm({
             range: NumRange(min: 30, max: 300),
           ),
         }),
-        handoff: (result) {
-          debugPrint('[gymgeist] handoff: with_workout_plan — $result');
-          showFeedback('Workout plan generated! Enter the app.');
-        },
+        handoff: null,
         next: Branch(
           id: 'nutrition_path',
           options: [
@@ -158,12 +113,7 @@ GenuiForm gymgeistOnboardingForm({
               child: Outcome(
                 id: 'full_meal_plan',
                 contractDelta: Contract(fields: {}),
-                handoff: (result) {
-                  debugPrint('[gymgeist] handoff: full_meal_plan — $result');
-                  showFeedback(
-                    'Full setup complete — workout plan + meal plan ready!',
-                  );
-                },
+                handoff: null,
               ),
             ),
             BranchOption(
@@ -184,42 +134,44 @@ GenuiForm gymgeistOnboardingForm({
               child: Outcome(
                 id: 'full_macros',
                 contractDelta: Contract(fields: {}),
-                handoff: (result) {
-                  debugPrint('[gymgeist] handoff: full_macros — $result');
-                  showFeedback(
-                    'Full setup complete — workout plan + macro targets ready!',
-                  );
-                },
+                handoff: null,
               ),
             ),
             BranchOption(
               id: 'skip_nutrition',
               criterion: 'user opts out of nutrition entirely',
-              contractDelta: null, // no extra fields collected
+              contractDelta: null,
               child: Outcome(
                 id: 'workout_only',
                 contractDelta: Contract(fields: {}),
-                handoff: (result) {
-                  debugPrint('[gymgeist] handoff: workout_only — $result');
-                  showFeedback('Workout-only setup complete. Skip nutrition any time.');
-                },
+                handoff: null,
               ),
             ),
           ],
         ),
       ),
     ),
-
-    // ── Client & model ───────────────────────────────────────────────────────
-    client: client,
-    model: model,
-
-    // ── Lifecycle callbacks ──────────────────────────────────────────────────
-    onComplete: (result) {
-      // Outcome.handoff has already fired with context-specific feedback.
-    },
-    onEscalation: (rule) {
-      showFeedback('Session ended: ${rule.trigger}');
+    handoffMap: const {
+      'account_only': SimulatedHandoff(
+        label: 'Welcome — account ready (minimal setup)',
+        icon: 'person_add',
+      ),
+      'with_workout_plan': SimulatedHandoff(
+        label: 'Workout plan generated — enter the app',
+        icon: 'fitness_center',
+      ),
+      'full_meal_plan': SimulatedHandoff(
+        label: 'Full setup — workout + meal plan ready',
+        icon: 'restaurant_menu',
+      ),
+      'full_macros': SimulatedHandoff(
+        label: 'Full setup — workout + macro targets ready',
+        icon: 'calculate',
+      ),
+      'workout_only': SimulatedHandoff(
+        label: 'Workout-only setup complete',
+        icon: 'check_circle',
+      ),
     },
   );
 }

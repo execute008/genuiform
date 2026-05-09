@@ -3,7 +3,9 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:genuiform/genuiform.dart';
 
+import 'a2ui/a2ui_outcome_emitter.dart';
 import 'api_key_panel.dart';
+import 'scenario_page.dart';
 import 'scenarios/freelance_qualification.dart';
 import 'scenarios/gymgeist_onboarding.dart';
 
@@ -36,9 +38,13 @@ class _HomeScreenState extends State<HomeScreen> {
   static const _envApiKey = String.fromEnvironment('GEMINI_API_KEY');
   static const _envProjectId = String.fromEnvironment('GEMINI_PROJECT_ID');
 
-  // The notifiers are pre-seeded with the compile-time values (may be '').
   late final ValueNotifier<String> _apiKey;
   late final ValueNotifier<String> _projectId;
+
+  /// Runtime toggle controlling whether terminal outcomes render via the
+  /// A2UI machinery (`A2uiOutcomeRenderer` streaming a Vertex-emitted A2UI
+  /// tree, with hand-crafted fallback) or via a SnackBar.
+  late final ValueNotifier<bool> _useA2ui;
 
   static const _model = 'gemini-2.5-flash';
 
@@ -47,12 +53,14 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _apiKey = ValueNotifier(_envApiKey);
     _projectId = ValueNotifier(_envProjectId);
+    _useA2ui = ValueNotifier(false);
   }
 
   @override
   void dispose() {
     _apiKey.dispose();
     _projectId.dispose();
+    _useA2ui.dispose();
     super.dispose();
   }
 
@@ -62,15 +70,41 @@ class _HomeScreenState extends State<HomeScreen> {
         location: 'europe-west1',
       );
 
-  void _showFeedback(String msg) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(msg)));
-  }
+  /// Builds a fresh emitter scoped to one scenario run. The page disposes
+  /// the loader's stream when it tears down; the emitter itself is
+  /// stateless beyond the bound [LlmClient], so re-creation is cheap.
+  A2uiOutcomeEmitter _buildEmitter(LlmClient client) =>
+      A2uiOutcomeEmitter(client: client, model: _model);
 
-  void _openScenario(Widget scenario) {
+  void _openScenario({
+    required String title,
+    required ScenarioSpec Function({required void Function(String) showFeedback})
+        specBuilder,
+  }) {
     Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => scenario),
+      MaterialPageRoute<void>(
+        builder: (routeContext) {
+          final client = _buildClient();
+          // showFeedback for EscalateIf handlers — uses the page's scaffold,
+          // not this home screen's, so we need the route's context.
+          void showFeedback(String msg) {
+            if (!routeContext.mounted) return;
+            ScaffoldMessenger.of(routeContext)
+              ..hideCurrentSnackBar()
+              ..showSnackBar(SnackBar(content: Text(msg)));
+          }
+
+          final spec = specBuilder(showFeedback: showFeedback);
+          return ScenarioPage(
+            title: title,
+            spec: spec,
+            client: client,
+            model: _model,
+            useA2ui: _useA2ui.value,
+            emitter: _useA2ui.value ? _buildEmitter(client) : null,
+          );
+        },
+      ),
     );
   }
 
@@ -79,7 +113,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('genuiform examples')),
       body: ListenableBuilder(
-        listenable: Listenable.merge([_apiKey, _projectId]),
+        listenable: Listenable.merge([_apiKey, _projectId, _useA2ui]),
         builder: (context, _) {
           final hasKey =
               _apiKey.value.isNotEmpty && _projectId.value.isNotEmpty;
@@ -101,20 +135,35 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 const SizedBox(height: 16),
 
+                // ── A2UI mode toggle ────────────────────────────────────────
+                Card(
+                  child: SwitchListTile(
+                    value: _useA2ui.value,
+                    onChanged: (v) => _useA2ui.value = v,
+                    title: const Text('A2UI outcome screens'),
+                    subtitle: Text(
+                      _useA2ui.value
+                          ? 'Terminal outcomes render via flutter/genui '
+                              '(A2UI v0.9). Vertex emits the tree; falls '
+                              'back to a hand-crafted tree on timeout/error.'
+                          : 'Terminal outcomes show a SnackBar with the '
+                              'handoff label (deterministic).',
+                    ),
+                    secondary: Icon(
+                      _useA2ui.value
+                          ? Icons.electric_bolt
+                          : Icons.notifications_outlined,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+
                 // ── Demo 1 ──────────────────────────────────────────────────
                 FilledButton.icon(
                   onPressed: hasKey
                       ? () => _openScenario(
-                            Scaffold(
-                              appBar: AppBar(
-                                title: const Text('Freelance qualification'),
-                              ),
-                              body: freelanceQualificationForm(
-                                client: _buildClient(),
-                                model: _model,
-                                showFeedback: _showFeedback,
-                              ),
-                            ),
+                            title: 'Freelance qualification',
+                            specBuilder: freelanceQualificationSpec,
                           )
                       : null,
                   icon: const Icon(Icons.support_agent),
@@ -128,16 +177,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 FilledButton.icon(
                   onPressed: hasKey
                       ? () => _openScenario(
-                            Scaffold(
-                              appBar: AppBar(
-                                title: const Text('GymGeist onboarding'),
-                              ),
-                              body: gymgeistOnboardingForm(
-                                client: _buildClient(),
-                                model: _model,
-                                showFeedback: _showFeedback,
-                              ),
-                            ),
+                            title: 'GymGeist onboarding',
+                            specBuilder: gymgeistOnboardingSpec,
                           )
                       : null,
                   icon: const Icon(Icons.fitness_center),
@@ -149,8 +190,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
                 // ── Demo 3 — Dev tools (works without a real Vertex key) ────
                 FilledButton.icon(
-                  onPressed: () => _openScenario(
-                    const _DevToolsDemoScreen(),
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const _DevToolsDemoScreen(),
+                    ),
                   ),
                   icon: const Icon(Icons.developer_mode),
                   label: const Text(

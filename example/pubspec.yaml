@@ -38,6 +38,11 @@ dependencies:
   genuiform:
     path: ../
 
+  # A2UI integration — render generative outcome screens via Google's
+  # flutter/genui SDK. Pinned exactly (no caret) for the May 9 hackathon
+  # to mirror the workbench's resolution. See A2UI_AGENDA.md option C.
+  genui: 0.9.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
