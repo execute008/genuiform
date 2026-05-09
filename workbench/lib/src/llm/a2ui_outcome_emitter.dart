@@ -110,7 +110,12 @@ class A2uiOutcomeEmitter {
     // async* generator's implicit error channel pass them through.
     await for (final rawChunk in client.generate(
       systemPrompt: systemPrompt,
-      messages: const [],
+      messages: [
+        Message(
+          role: MessageRole.user,
+          content: 'Generate the outcome screen now.',
+        ),
+      ],
       responseSchema: a2uiOutcomeResponseSchema(),
       model: model,
     )) {
