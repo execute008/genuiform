@@ -69,13 +69,15 @@ class WorkbenchMockLlmClient extends LlmClient {
   Stream<String> generate({
     required String systemPrompt,
     required List<Message> messages,
-    required Map<String, dynamic> responseSchema,
+    Map<String, dynamic>? responseSchema,
+    Map<String, dynamic>? responseJsonSchema,
     required String model,
     double temperature = 0.7,
+    String? cachedContent,
   }) {
     final scenario = _detectScenario(systemPrompt);
     String response;
-    
+
     if (_callCount < _genericSteps.length) {
       // Use generic steps for the first few interactions
       response = _genericSteps[_callCount];
@@ -83,10 +85,21 @@ class WorkbenchMockLlmClient extends LlmClient {
       // Use scenario-specific completion
       response = _getCompletionForScenario(scenario);
     }
-    
+
     _callCount++;
     return Stream.fromFuture(
       Future.delayed(_delay, () => response),
     );
   }
+
+  @override
+  Future<String> createCachedContent({
+    required String systemInstruction,
+    required String model,
+    Duration ttl = const Duration(seconds: 300),
+  }) async => throw UnimplementedError(
+      'WorkbenchMockLlmClient does not support cachedContents');
+
+  @override
+  Future<void> deleteCachedContent(String name) async {}
 }

@@ -287,6 +287,158 @@ void main() {
     });
   });
 
+  group('GeminiApiClient — cachedContent', () {
+    test('generate with cachedContent sends top-level cachedContent field and no systemInstruction',
+        () async {
+      late Map<String, dynamic> capturedBody;
+
+      final client = _makeClient((request) async {
+        capturedBody = jsonDecode(request.body) as Map<String, dynamic>;
+        return http.Response(_sseResponse('{"ok":true}'), 200);
+      });
+
+      await client
+          .generate(
+            systemPrompt: 'ignored because cached',
+            messages: [Message(role: MessageRole.user, content: 'hi')],
+            responseSchema: {},
+            model: 'gemini-2.5-flash',
+            cachedContent: 'cachedContents/foo',
+          )
+          .first;
+
+      expect(capturedBody.containsKey('cachedContent'), isTrue);
+      expect(capturedBody['cachedContent'], 'cachedContents/foo');
+      expect(capturedBody.containsKey('systemInstruction'), isFalse);
+      expect(capturedBody.containsKey('contents'), isTrue);
+      expect(capturedBody.containsKey('generationConfig'), isTrue);
+    });
+
+    test('generate without cachedContent sends systemInstruction as before',
+        () async {
+      late Map<String, dynamic> capturedBody;
+
+      final client = _makeClient((request) async {
+        capturedBody = jsonDecode(request.body) as Map<String, dynamic>;
+        return http.Response(_sseResponse('{"ok":true}'), 200);
+      });
+
+      await client
+          .generate(
+            systemPrompt: 'You are a form designer.',
+            messages: [Message(role: MessageRole.user, content: 'hi')],
+            responseSchema: {},
+            model: 'gemini-2.5-flash',
+          )
+          .first;
+
+      expect(capturedBody.containsKey('systemInstruction'), isTrue);
+      expect(capturedBody.containsKey('cachedContent'), isFalse);
+    });
+
+    test('createCachedContent POSTs to correct URL with correct body and returns name',
+        () async {
+      late Uri capturedUri;
+      late Map<String, dynamic> capturedBody;
+      late Map<String, String> capturedHeaders;
+
+      final client = GeminiApiClient(
+        apiKey: 'AIza-test-key',
+        httpClient: MockClient((request) async {
+          capturedUri = request.url;
+          capturedBody = jsonDecode(request.body) as Map<String, dynamic>;
+          capturedHeaders = request.headers;
+          return http.Response(
+            jsonEncode({'name': 'cachedContents/abc123', 'expireTime': '2026-01-01T00:00:00Z'}),
+            200,
+          );
+        }),
+      );
+
+      final name = await client.createCachedContent(
+        systemInstruction: 'You are a form designer.',
+        model: 'gemini-2.5-flash',
+        ttl: const Duration(seconds: 300),
+      );
+
+      expect(name, 'cachedContents/abc123');
+      expect(capturedUri.path, '/v1beta/cachedContents');
+      expect(capturedBody['model'], 'models/gemini-2.5-flash');
+      expect(capturedBody['ttl'], '300s');
+      final sysInstr = capturedBody['systemInstruction'] as Map<String, dynamic>;
+      expect(
+        (sysInstr['parts'] as List).first,
+        containsPair('text', 'You are a form designer.'),
+      );
+      expect(capturedHeaders['x-goog-api-key'], 'AIza-test-key');
+    });
+
+    test('createCachedContent throws CacheError on non-2xx response', () async {
+      final client = GeminiApiClient(
+        apiKey: 'AIza-test-key',
+        httpClient: MockClient((_) async =>
+            http.Response('{"error":"quota exceeded"}', 429)),
+      );
+
+      await expectLater(
+        client.createCachedContent(
+          systemInstruction: 'sys',
+          model: 'gemini-2.5-flash',
+        ),
+        throwsA(isA<CacheError>()),
+      );
+    });
+
+    test('HTTP 404 on cachedContent reference maps to CacheError', () async {
+      final client = _makeClient(
+        (request) async => http.Response('{"error":"not found"}', 404),
+      );
+
+      await expectLater(
+        client.generate(
+          systemPrompt: 'sys',
+          messages: [],
+          responseSchema: {},
+          model: 'gemini-2.5-flash',
+          cachedContent: 'cachedContents/expired',
+        ),
+        emitsError(isA<CacheError>()),
+      );
+    });
+
+    test('deleteCachedContent sends DELETE to correct URL', () async {
+      late Uri capturedUri;
+      late String capturedMethod;
+      late Map<String, String> capturedHeaders;
+
+      final client = GeminiApiClient(
+        apiKey: 'AIza-test-key',
+        httpClient: MockClient((request) async {
+          capturedUri = request.url;
+          capturedMethod = request.method;
+          capturedHeaders = request.headers;
+          return http.Response('', 200);
+        }),
+      );
+
+      await client.deleteCachedContent('cachedContents/abc123');
+
+      expect(capturedMethod, 'DELETE');
+      expect(capturedUri.path, '/v1beta/cachedContents/abc123');
+      expect(capturedHeaders['x-goog-api-key'], 'AIza-test-key');
+    });
+
+    test('deleteCachedContent swallows 404 without throwing', () async {
+      final client = GeminiApiClient(
+        apiKey: 'AIza-test-key',
+        httpClient: MockClient((_) async => http.Response('', 404)),
+      );
+
+      // Should not throw
+      await client.deleteCachedContent('cachedContents/expired');
+    });
+  });
+
   group('GeminiApiClient — error handling', () {
     test('HTTP 401 maps to AuthError', () async {
       final client = _makeClient(

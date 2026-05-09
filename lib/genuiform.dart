@@ -124,7 +124,11 @@ export 'src/strategies/form_config.dart' show FormConfig;
 
 // Prompt assembly helpers (useful for debugging and logging).
 export 'src/strategies/prompt_builder.dart'
-    show buildGenerativeSystemPrompt, buildGuidedSystemPrompt;
+    show
+        buildStaticSystemPrompt,
+        buildDynamicTurnContext,
+        buildGenerativeSystemPrompt,
+        buildGuidedSystemPrompt;
 
 // Generative strategy — every step from the LLM.
 export 'src/strategies/generative_strategy.dart' show GenerativeStrategy;

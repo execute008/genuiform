@@ -60,9 +60,20 @@ class _ErrorLlmClient extends LlmClient {
     Map<String, dynamic>? responseJsonSchema,
     required String model,
     double temperature = 0.7,
+    String? cachedContent,
   }) {
     return Stream.error(_error);
   }
+
+  @override
+  Future<String> createCachedContent({
+    required String systemInstruction,
+    required String model,
+    Duration ttl = const Duration(seconds: 300),
+  }) async => throw UnimplementedError();
+
+  @override
+  Future<void> deleteCachedContent(String name) async {}
 }
 
 /// An [LlmClient] that yields a fixed list of [_deltas] in order, simulating
@@ -81,9 +92,20 @@ class _StreamingLlmClient extends LlmClient {
     Map<String, dynamic>? responseJsonSchema,
     required String model,
     double temperature = 0.7,
+    String? cachedContent,
   }) {
     return Stream<String>.fromIterable(_deltas);
   }
+
+  @override
+  Future<String> createCachedContent({
+    required String systemInstruction,
+    required String model,
+    Duration ttl = const Duration(seconds: 300),
+  }) async => throw UnimplementedError();
+
+  @override
+  Future<void> deleteCachedContent(String name) async {}
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────

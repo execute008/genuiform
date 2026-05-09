@@ -569,6 +569,44 @@ void main() {
     });
   });
 
+  group('GenerativeStrategy — cachedContent passthrough', () {
+    test('passes config.cachedContent through to client.generate', () async {
+      final client = FakeLlmClient(scriptedResponses: [_askStepJson()]);
+      final config = FormConfig(
+        contract: sampleContract(),
+        constraints: const [],
+        posture: Posture.salesDiscovery(),
+        outcomes: Outcome(
+          id: 'lead_qualified',
+          contractDelta: Contract(fields: {}),
+          handoff: null,
+        ),
+        client: client,
+        model: 'gemini-2.5-flash',
+        cachedContent: 'cachedContents/test-123',
+      );
+      final session = sampleSession();
+      final strategy = GenerativeStrategy();
+
+      await strategy.nextStep(session, config).toList();
+
+      expect(client.invocations, hasLength(1));
+      expect(client.invocations.first.cachedContent, 'cachedContents/test-123');
+    });
+
+    test('passes null cachedContent when config has no cachedContent', () async {
+      final client = FakeLlmClient(scriptedResponses: [_askStepJson()]);
+      final config = _makeConfig(client: client);
+      final session = sampleSession();
+      final strategy = GenerativeStrategy();
+
+      await strategy.nextStep(session, config).toList();
+
+      expect(client.invocations, hasLength(1));
+      expect(client.invocations.first.cachedContent, isNull);
+    });
+  });
+
   group('GenerativeStrategy — streaming buffer', () {
     test('4 JSON fragments produce a single StepReady event', () async {
       // Split the JSON into 4 fragments
@@ -628,7 +666,18 @@ class _MultiChunkFakeLlmClient extends LlmClient {
     Map<String, dynamic>? responseJsonSchema,
     required String model,
     double temperature = 0.7,
+    String? cachedContent,
   }) {
     return Stream.fromIterable(chunks);
   }
+
+  @override
+  Future<String> createCachedContent({
+    required String systemInstruction,
+    required String model,
+    Duration ttl = const Duration(seconds: 300),
+  }) async => 'cachedContents/fake';
+
+  @override
+  Future<void> deleteCachedContent(String name) async {}
 }

@@ -77,10 +77,10 @@ class GenerativeStrategy extends Strategy {
       }
 
       // ── Step 2: build system prompt ───────────────────────────────────────
-      final systemPrompt = buildGenerativeSystemPrompt(config, session);
+      final systemPrompt = buildStaticSystemPrompt(config);
 
       // ── Step 3: call LLM and buffer the stream ────────────────────────────
-      final messages = _buildMessages(session);
+      final messages = _buildMessages(config, session);
       final responseSchema = generativeStrategyResponseSchema();
 
       final buffer = StringBuffer();
@@ -90,6 +90,7 @@ class GenerativeStrategy extends Strategy {
         responseSchema: responseSchema,
         model: config.model,
         temperature: config.temperature,
+        cachedContent: config.cachedContent,
       )) {
         buffer.write(chunk);
       }
@@ -237,18 +238,33 @@ class GenerativeStrategy extends Strategy {
 
   // ── Private helpers ─────────────────────────────────────────────────────────
 
-  List<Message> _buildMessages(Session session) {
+  List<Message> _buildMessages(FormConfig config, Session session) {
+    final dynamicContext = buildDynamicTurnContext(config, session);
     final messages = <Message>[];
-    for (final answer in session.history) {
+
+    if (session.history.isEmpty) {
+      // No prior turns — synthesize a single user message carrying only the
+      // dynamic context block.
+      messages.add(Message(
+        role: MessageRole.user,
+        content: dynamicContext,
+      ));
+      return messages;
+    }
+
+    for (var i = 0; i < session.history.length; i++) {
+      final answer = session.history[i];
       // Assistant asked the question
       messages.add(Message(
         role: MessageRole.assistant,
         content: answer.stepSpec.title,
       ));
-      // User gave an answer
+      // User gave an answer; append dynamic context to the last user turn.
+      final userContent = answer.answer?.toString() ?? '';
+      final isLast = i == session.history.length - 1;
       messages.add(Message(
         role: MessageRole.user,
-        content: answer.answer?.toString() ?? '',
+        content: isLast ? '$userContent\n\n$dynamicContext' : userContent,
       ));
     }
     return messages;

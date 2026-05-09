@@ -66,6 +66,7 @@ class VertexProxyClient extends LlmClient {
     Map<String, dynamic>? responseJsonSchema,
     required String model,
     double temperature = 0.7,
+    String? cachedContent,
   }) {
     assert(
       (responseSchema == null) != (responseJsonSchema == null),
@@ -79,6 +80,7 @@ class VertexProxyClient extends LlmClient {
       responseJsonSchema: responseJsonSchema,
       model: model,
       temperature: temperature,
+      cachedContent: cachedContent,
     );
   }
 
@@ -89,6 +91,7 @@ class VertexProxyClient extends LlmClient {
     required Map<String, dynamic>? responseJsonSchema,
     required String model,
     required double temperature,
+    required String? cachedContent,
   }) async* {
     final token = await authProvider();
     if (token == null || token.isEmpty) {
@@ -104,6 +107,9 @@ class VertexProxyClient extends LlmClient {
       if (responseJsonSchema != null) 'responseJsonSchema': responseJsonSchema,
       'model': model,
       'temperature': temperature,
+      // TODO(proxy): the server-side proxy function needs to forward
+      // cachedContent to Vertex AI's :streamGenerateContent endpoint.
+      if (cachedContent != null) 'cachedContent': cachedContent,
     };
 
     http.Response response;
@@ -208,5 +214,30 @@ class VertexProxyClient extends LlmClient {
     }
 
     yield accumulated;
+  }
+
+  /// Not implemented — [VertexProxyClient] does not support direct REST calls
+  /// to cachedContents. Vertex AI calls from Flutter clients must go through
+  /// `FirebaseVertexAI.instance` or the server-side proxy. Add a
+  /// `/cachedContents` endpoint to the proxy function if needed.
+  @override
+  Future<String> createCachedContent({
+    required String systemInstruction,
+    required String model,
+    Duration ttl = const Duration(seconds: 300),
+  }) {
+    throw UnimplementedError(
+      'VertexProxyClient: cachedContents not yet implemented. '
+      'Add a /cachedContents endpoint to the proxy function.',
+    );
+  }
+
+  /// Not implemented — see [createCachedContent] for rationale.
+  @override
+  Future<void> deleteCachedContent(String name) {
+    throw UnimplementedError(
+      'VertexProxyClient: cachedContents not yet implemented. '
+      'Add a /cachedContents endpoint to the proxy function.',
+    );
   }
 }

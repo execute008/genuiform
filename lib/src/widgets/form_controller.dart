@@ -10,7 +10,9 @@ import '../runtime/constraint_enforcer.dart';
 import '../runtime/engagement_reader.dart';
 import '../runtime/outcome_navigator.dart';
 import '../strategies/form_config.dart';
+import '../strategies/prompt_builder.dart';
 import '../strategies/strategy.dart';
+import '../llm/llm_client.dart';
 
 /// The state engine for a [GenuiForm] session.
 ///
@@ -54,6 +56,9 @@ class FormController {
   bool _isAwaiting = false;
   bool _disposed = false;
 
+  /// Resource name of the active cached content for this session, if any.
+  String? _cacheName;
+
   final _sessionsCtrl = StreamController<Session>.broadcast();
   final _eventsCtrl = StreamController<StepEvent>.broadcast();
 
@@ -84,6 +89,7 @@ class FormController {
   Future<void> start() async {
     _session = _buildInitialSession();
     _sessionsCtrl.add(_session);
+    await _warmCache();
     await _runStrategyLoop();
   }
 
@@ -235,6 +241,9 @@ class FormController {
     if (_disposed) return;
     if (newConfig == config) return;
 
+    // Drop the stale cache — the static prompt may have changed.
+    _dropCache();
+
     final currentNodeId = _session.currentNode.id;
     final matchingNode = newConfig.outcomes
         .descendants()
@@ -280,6 +289,7 @@ class FormController {
     _currentStep = null;
     _emitSession();
 
+    await _warmCache();
     await _runStrategyLoop();
   }
 
@@ -287,8 +297,39 @@ class FormController {
   Future<void> dispose() async {
     if (_disposed) return;
     _disposed = true;
+    _dropCache();
     await _sessionsCtrl.close();
     await _eventsCtrl.close();
+  }
+
+  // ── Cache helpers ───────────────────────────────────────────────────────────
+
+  /// Creates a cached content entry and stashes the name in [config].
+  /// Best-effort — any failure is swallowed; the form continues uncached.
+  Future<void> _warmCache() async {
+    try {
+      final name = await config.client.createCachedContent(
+        systemInstruction: buildStaticSystemPrompt(config),
+        model: config.model,
+        ttl: const Duration(seconds: 300),
+      );
+      _cacheName = name;
+      config = config.copyWith(cachedContent: name);
+    } catch (_) {
+      // Best-effort — proceed without caching.
+      _cacheName = null;
+    }
+  }
+
+  /// Fires-and-forgets deletion of [_cacheName] and clears the local state.
+  void _dropCache() {
+    if (_cacheName != null) {
+      final name = _cacheName!;
+      _cacheName = null;
+      config = config.copyWith(cachedContent: null);
+      // Fire-and-forget — ignore errors.
+      config.client.deleteCachedContent(name).ignore();
+    }
   }
 
   // ── Internal helpers ────────────────────────────────────────────────────────
@@ -319,15 +360,37 @@ class FormController {
   /// the "Next" button from re-appearing after a failed strategy call that
   /// was triggered by [submitAnswer], which would otherwise allow the user to
   /// re-submit the same answer and duplicate the history entry.
+  ///
+  /// Cache-miss recovery: if a [StreamError] wraps a [CacheError], the cache
+  /// is recreated and the strategy is retried once. If the retry also fails,
+  /// the error is surfaced normally.
   Future<void> _runStrategyLoop({bool clearStepOnError = false}) async {
     if (_disposed) return;
     _isAwaiting = true;
 
     try {
-      // Collect all events from the strategy stream to avoid premature
-      // generator cancellation (breaking `await for` early sends a cancel
-      // signal that can trigger the generator's catch block).
       final events = await _strategy.nextStep(_session, config).toList();
+      final cacheErrorEvent = events.length == 1 &&
+          events.first is StreamError &&
+          (events.first as StreamError).error is CacheError;
+
+      if (cacheErrorEvent) {
+        // Cache miss — recreate and retry once.
+        _cacheName = null;
+        config = config.copyWith(cachedContent: null);
+        await _warmCache();
+        final retryEvents =
+            await _strategy.nextStep(_session, config).toList();
+        for (final event in retryEvents) {
+          if (_disposed) break;
+          if (clearStepOnError && event is StreamError) {
+            _currentStep = null;
+          }
+          _handleStrategyEvent(event);
+        }
+        return;
+      }
+
       for (final event in events) {
         if (_disposed) break;
         if (clearStepOnError && event is StreamError) {

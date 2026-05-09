@@ -17,6 +17,8 @@ abstract class LlmClient {
   ///
   /// Parameters:
   /// - [systemPrompt] — injected as `systemInstruction` in the Gemini payload.
+  ///   Ignored (omitted from the wire payload) when [cachedContent] is non-null,
+  ///   because the system instruction is already baked into the cache.
   /// - [messages] — conversation history; mapped to Gemini `contents`.
   /// - [responseSchema] — legacy OpenAPI 3.0 subset. Sent as
   ///   `generationConfig.responseSchema`. Honours `enum`, `minimum`,
@@ -28,6 +30,10 @@ abstract class LlmClient {
   ///   semantics. Use this for discriminated-union response shapes.
   /// - [model] — Gemini model ID string (e.g. `'gemini-2.5-flash'`). No enum.
   /// - [temperature] — defaults to 0.7; clamped by the backend to the model's range.
+  /// - [cachedContent] — resource name of a previously created cached content
+  ///   (e.g. `'cachedContents/abc123'`). When non-null, [systemPrompt] is
+  ///   omitted from the wire payload; the cache entry carries it. A 404 on the
+  ///   cache reference surfaces as [CacheError] on the error channel.
   ///
   /// Exactly one of [responseSchema] or [responseJsonSchema] must be provided.
   ///
@@ -42,7 +48,27 @@ abstract class LlmClient {
     Map<String, dynamic>? responseJsonSchema,
     required String model,
     double temperature = 0.7,
+    String? cachedContent,
   });
+
+  /// Creates a cached content entry on the Gemini API containing
+  /// [systemInstruction] for [model], expiring after [ttl].
+  ///
+  /// Returns the resource name (e.g. `'cachedContents/abc123'`) which can
+  /// then be passed to [generate] as [cachedContent].
+  ///
+  /// Throws [CacheError] on failure.
+  Future<String> createCachedContent({
+    required String systemInstruction,
+    required String model,
+    Duration ttl = const Duration(seconds: 300),
+  });
+
+  /// Deletes a previously created cached content entry.
+  ///
+  /// Best-effort — implementations should swallow 404 and 5xx rather than
+  /// throwing. [name] is the resource name returned by [createCachedContent].
+  Future<void> deleteCachedContent(String name);
 }
 
 // ---------------------------------------------------------------------------
@@ -94,6 +120,12 @@ class RateLimitError extends LlmClientError {
 /// whose structure does not satisfy [LlmClient.generate]'s [responseSchema].
 class SchemaError extends LlmClientError {
   const SchemaError(super.message);
+}
+
+/// A cached content reference was invalid or expired (HTTP 404 on a
+/// cachedContent resource, or a failure during cache creation).
+class CacheError extends LlmClientError {
+  const CacheError(super.message);
 }
 
 /// Any error not covered by the other subtypes.

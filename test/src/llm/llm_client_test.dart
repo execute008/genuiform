@@ -13,9 +13,20 @@ class _TestLlmClient extends LlmClient {
     Map<String, dynamic>? responseJsonSchema,
     required String model,
     double temperature = 0.7,
+    String? cachedContent,
   }) {
     return Stream.value('{"ok":true}');
   }
+
+  @override
+  Future<String> createCachedContent({
+    required String systemInstruction,
+    required String model,
+    Duration ttl = const Duration(seconds: 300),
+  }) async => 'cachedContents/fake';
+
+  @override
+  Future<void> deleteCachedContent(String name) async {}
 }
 
 void main() {
@@ -76,6 +87,12 @@ void main() {
     test('SchemaError implements LlmClientError', () {
       const err = SchemaError('JSON parse failed');
       expect(err, isA<LlmClientError>());
+    });
+
+    test('CacheError implements LlmClientError', () {
+      const err = CacheError('cache expired');
+      expect(err, isA<LlmClientError>());
+      expect(err.message, 'cache expired');
     });
 
     test('UnknownError carries cause', () {

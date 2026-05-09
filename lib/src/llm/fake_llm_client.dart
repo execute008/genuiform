@@ -28,6 +28,9 @@ class FakeLlmInvocation {
   /// The [LlmClient.generate] `temperature` argument.
   final double temperature;
 
+  /// The [LlmClient.generate] `cachedContent` argument, if provided.
+  final String? cachedContent;
+
   const FakeLlmInvocation({
     required this.systemPrompt,
     required this.messages,
@@ -35,6 +38,22 @@ class FakeLlmInvocation {
     required this.responseJsonSchema,
     required this.model,
     required this.temperature,
+    this.cachedContent,
+  });
+}
+
+/// A recorded invocation of [FakeLlmClient.createCachedContent].
+class FakeCachedContentCreation {
+  final String systemInstruction;
+  final String model;
+  final Duration ttl;
+  final String returnedName;
+
+  const FakeCachedContentCreation({
+    required this.systemInstruction,
+    required this.model,
+    required this.ttl,
+    required this.returnedName,
   });
 }
 
@@ -61,6 +80,9 @@ class FakeLlmClient extends LlmClient {
   final List<String> _remaining;
   final Duration? _responseDelay;
   final List<FakeLlmInvocation> _invocations = [];
+  final List<FakeCachedContentCreation> _cachedContents = [];
+  final List<String> _deletedCachedContents = [];
+  int _cacheCounter = 0;
 
   /// Creates a [FakeLlmClient] with [scriptedResponses].
   ///
@@ -78,6 +100,14 @@ class FakeLlmClient extends LlmClient {
   /// All [generate] invocations recorded so far, in call order.
   List<FakeLlmInvocation> get invocations => List.unmodifiable(_invocations);
 
+  /// All [createCachedContent] invocations recorded so far, in call order.
+  List<FakeCachedContentCreation> get cachedContents =>
+      List.unmodifiable(_cachedContents);
+
+  /// All resource names passed to [deleteCachedContent], in call order.
+  List<String> get deletedCachedContents =>
+      List.unmodifiable(_deletedCachedContents);
+
   @override
   Stream<String> generate({
     required String systemPrompt,
@@ -86,6 +116,7 @@ class FakeLlmClient extends LlmClient {
     Map<String, dynamic>? responseJsonSchema,
     required String model,
     double temperature = 0.7,
+    String? cachedContent,
   }) {
     assert(
       (responseSchema == null) != (responseJsonSchema == null),
@@ -109,6 +140,7 @@ class FakeLlmClient extends LlmClient {
         responseJsonSchema: responseJsonSchema,
         model: model,
         temperature: temperature,
+        cachedContent: cachedContent,
       ),
     );
 
@@ -117,5 +149,26 @@ class FakeLlmClient extends LlmClient {
         : Stream.fromFuture(
             Future.delayed(_responseDelay, () => response),
           );
+  }
+
+  @override
+  Future<String> createCachedContent({
+    required String systemInstruction,
+    required String model,
+    Duration ttl = const Duration(seconds: 300),
+  }) async {
+    final name = 'cachedContents/fake-${++_cacheCounter}';
+    _cachedContents.add(FakeCachedContentCreation(
+      systemInstruction: systemInstruction,
+      model: model,
+      ttl: ttl,
+      returnedName: name,
+    ));
+    return name;
+  }
+
+  @override
+  Future<void> deleteCachedContent(String name) async {
+    _deletedCachedContents.add(name);
   }
 }

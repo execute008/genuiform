@@ -14,19 +14,27 @@ import 'form_config.dart';
 // Public API
 // ---------------------------------------------------------------------------
 
-/// Builds the §10.1 generative system prompt from [config] and [session].
+/// Builds the byte-stable portion of the system prompt from [config] alone.
 ///
-/// The output is deterministic for a given config + session pair. If the
-/// wording drifts from spec §10.1, the golden test in
-/// `test/src/strategies/generative_prompt_test.dart` will fail on purpose
-/// so the diff can be reviewed.
-String buildGenerativeSystemPrompt(FormConfig config, Session session) {
-  final contractSection = _renderContract(session.runningContract);
+/// This function is a pure function of [FormConfig] — it does not read any
+/// per-session state (no history, no currentNode marker, no runningContract
+/// deltas). The output is identical for all sessions sharing the same config,
+/// which makes it eligible for Gemini's `cachedContents` API.
+///
+/// Section order:
+///   1. Role preamble
+///   2. YOUR JOB EACH TURN
+///   3. BASE CONTRACT
+///   4. CONSTRAINTS
+///   5. POSTURE
+///   6. OUTCOME TREE (no `<<<` marker)
+///   7. INSTRUCTIONS
+///   8. JSON-only directive
+String buildStaticSystemPrompt(FormConfig config) {
+  final contractSection = _renderContract(config.contract);
   final constraintsSection = _renderConstraints(config.constraints);
   final postureSection = _renderPosture(config.posture);
-  final treeSection = _renderOutcomeTree(config.outcomes, session.currentNode);
-  final historySection = _renderCompactHistory(session.history);
-  final engagementSection = _renderEngagement(session.lastSignal);
+  final treeSection = _renderOutcomeTreeStatic(config.outcomes);
   final iconSection = _renderIconRegistry();
 
   return '''You are a form designer running an adaptive intake conversation.
@@ -41,7 +49,7 @@ YOUR JOB EACH TURN:
   c) Resolve a Branch (we have enough to pick which path)
   d) Mark the form complete (we've reached an Outcome)
 
-CONTRACT (running, including current path through outcome tree):
+BASE CONTRACT (collected for completion; deltas added per path):
 $contractSection
 
 CONSTRAINTS (hard rules — never violate):
@@ -50,14 +58,8 @@ $constraintsSection
 POSTURE:
 $postureSection
 
-OUTCOME TREE (current position highlighted):
+OUTCOME TREE:
 $treeSection
-
-CONVERSATION SO FAR:
-$historySection
-
-ENGAGEMENT SIGNAL FROM LAST ANSWER:
-$engagementSection
 
 INSTRUCTIONS:
 - Ask ONE focused question per step. Never bundle.
@@ -69,6 +71,50 @@ INSTRUCTIONS:
 - Never invent input types. Use only: slider, choice, multiChoice, text, number, date, noneJustInformation.
 
 Return ONLY valid JSON matching the schema. No prose, no markdown.''';
+}
+
+/// Builds a small per-turn context block containing only the information that
+/// changes between turns: the current node, any contract deltas relative to
+/// the base, and the last engagement signal.
+///
+/// This block is appended to the final user message in `_buildMessages`, not
+/// injected into the system prompt.
+///
+/// Format:
+/// ```
+/// [CONTEXT]
+/// current_node: <id>
+/// contract_delta: <fields not in config.contract, or "(none)">
+/// last_engagement: <wireValue>
+/// ```
+String buildDynamicTurnContext(FormConfig config, Session session) {
+  final deltaFields = <String, dynamic>{};
+  for (final entry in session.runningContract.fields.entries) {
+    if (!config.contract.fields.containsKey(entry.key)) {
+      deltaFields[entry.key] = entry.value;
+    }
+  }
+
+  final deltaSection = deltaFields.isEmpty
+      ? '(none)'
+      : _renderContract(Contract(fields: Map.fromEntries(
+          deltaFields.entries.map((e) => MapEntry(e.key, e.value as dynamic)),
+        )));
+
+  return '''[CONTEXT]
+current_node: ${session.currentNode.id}
+contract_delta: $deltaSection
+last_engagement: ${session.lastSignal.wireValue}''';
+}
+
+/// Builds the §10.1 generative system prompt from [config] and [session].
+///
+/// @deprecated Use [buildStaticSystemPrompt] + [buildDynamicTurnContext]
+/// separately. This wrapper exists only for backwards-compatible test code
+/// that asserts against the combined prompt text. It will be removed once
+/// all callers are updated.
+String buildGenerativeSystemPrompt(FormConfig config, Session session) {
+  return buildStaticSystemPrompt(config);
 }
 
 /// Builds a shorter system prompt for [GuidedStrategy].
@@ -196,33 +242,31 @@ String _skipToleranceLabel(int v) => switch (v) {
       _ => 'fully accommodating; accept any skip immediately, no follow-up',
     };
 
-/// ASCII tree with `>>>` markers on the current node.
-String _renderOutcomeTree(OutcomeNode root, OutcomeNode current) {
+/// ASCII tree without any `<<<` current-node marker — stable across sessions.
+String _renderOutcomeTreeStatic(OutcomeNode root) {
   final buffer = StringBuffer();
-  _renderNode(root, '', true, current.id, buffer);
+  _renderNodeStatic(root, '', true, buffer);
   return buffer.toString().trimRight();
 }
 
-void _renderNode(
+void _renderNodeStatic(
   OutcomeNode node,
   String indent,
   bool isLast,
-  String currentId,
   StringBuffer buffer,
 ) {
   final connector = isLast ? '└── ' : '├── ';
   final childIndent = isLast ? '    ' : '│   ';
-  final marker = node.id == currentId ? ' <<<' : '';
 
   switch (node) {
     case Layer(:final id, :final next):
-      buffer.writeln('$indent${connector}Layer[$id]$marker');
+      buffer.writeln('$indent${connector}Layer[$id]');
       if (next != null) {
-        _renderNode(next, indent + childIndent, true, currentId, buffer);
+        _renderNodeStatic(next, indent + childIndent, true, buffer);
       }
 
     case Branch(:final id, :final options):
-      buffer.writeln('$indent${connector}Branch[$id]$marker');
+      buffer.writeln('$indent${connector}Branch[$id]');
       for (var i = 0; i < options.length; i++) {
         final opt = options[i];
         final optIsLast = i == options.length - 1;
@@ -231,17 +275,16 @@ void _renderNode(
         buffer.writeln(
           '$indent$childIndent${optConnector}option[${opt.id}]: ${opt.criterion}',
         );
-        _renderNode(
+        _renderNodeStatic(
           opt.child,
           indent + childIndent + optChildIndent,
           true,
-          currentId,
           buffer,
         );
       }
 
     case Outcome(:final id):
-      buffer.writeln('$indent${connector}Outcome[$id]$marker');
+      buffer.writeln('$indent${connector}Outcome[$id]');
   }
 }
 

@@ -97,7 +97,18 @@ class _FakeRealClient extends LlmClient {
     Map<String, dynamic>? responseJsonSchema,
     required String model,
     double temperature = 0.7,
+    String? cachedContent,
   }) {
     return Stream.value('{}');
   }
+
+  @override
+  Future<String> createCachedContent({
+    required String systemInstruction,
+    required String model,
+    Duration ttl = const Duration(seconds: 300),
+  }) async => throw UnimplementedError();
+
+  @override
+  Future<void> deleteCachedContent(String name) async {}
 }

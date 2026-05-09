@@ -49,6 +49,8 @@ class GeminiApiClient extends LlmClient {
 
   final http.Client _httpClient;
 
+  static const _baseUrl = 'https://generativelanguage.googleapis.com/v1beta';
+
   /// Creates a [GeminiApiClient].
   ///
   /// Inject [httpClient] to use a test double (e.g. `MockClient.streaming`
@@ -61,7 +63,7 @@ class GeminiApiClient extends LlmClient {
 
   Uri _buildUri(String model) {
     return Uri.parse(
-      'https://generativelanguage.googleapis.com/v1beta/models/$model'
+      '$_baseUrl/models/$model'
       ':streamGenerateContent',
     ).replace(queryParameters: {'alt': 'sse'});
   }
@@ -96,6 +98,7 @@ class GeminiApiClient extends LlmClient {
     Map<String, dynamic>? responseJsonSchema,
     required String model,
     double temperature = 0.7,
+    String? cachedContent,
   }) {
     assert(
       (responseSchema == null) != (responseJsonSchema == null),
@@ -109,6 +112,7 @@ class GeminiApiClient extends LlmClient {
       responseJsonSchema: responseJsonSchema,
       model: model,
       temperature: temperature,
+      cachedContent: cachedContent,
     );
   }
 
@@ -119,6 +123,7 @@ class GeminiApiClient extends LlmClient {
     required Map<String, dynamic>? responseJsonSchema,
     required String model,
     required double temperature,
+    required String? cachedContent,
   }) async* {
     final uri = _buildUri(model);
 
@@ -129,21 +134,38 @@ class GeminiApiClient extends LlmClient {
         ? [const Message(role: MessageRole.user, content: 'Begin.')]
         : messages;
 
-    final payload = {
-      'contents': effectiveMessages.map(_messageToContent).toList(),
-      'systemInstruction': {
-        'parts': [
-          {'text': systemPrompt},
-        ],
-      },
-      'generationConfig': {
-        'temperature': temperature,
-        'responseMimeType': 'application/json',
-        if (responseSchema != null) 'responseSchema': responseSchema,
-        if (responseJsonSchema != null)
-          'responseJsonSchema': responseJsonSchema,
-      },
-    };
+    final Map<String, dynamic> payload;
+    if (cachedContent != null) {
+      // When a cachedContent reference is provided, systemInstruction is
+      // already baked into the cache — omit it from the wire payload.
+      payload = {
+        'cachedContent': cachedContent,
+        'contents': effectiveMessages.map(_messageToContent).toList(),
+        'generationConfig': {
+          'temperature': temperature,
+          'responseMimeType': 'application/json',
+          if (responseSchema != null) 'responseSchema': responseSchema,
+          if (responseJsonSchema != null)
+            'responseJsonSchema': responseJsonSchema,
+        },
+      };
+    } else {
+      payload = {
+        'contents': effectiveMessages.map(_messageToContent).toList(),
+        'systemInstruction': {
+          'parts': [
+            {'text': systemPrompt},
+          ],
+        },
+        'generationConfig': {
+          'temperature': temperature,
+          'responseMimeType': 'application/json',
+          if (responseSchema != null) 'responseSchema': responseSchema,
+          if (responseJsonSchema != null)
+            'responseJsonSchema': responseJsonSchema,
+        },
+      };
+    }
 
     final request = http.Request('POST', uri);
     request.headers['x-goog-api-key'] = apiKey;
@@ -178,6 +200,12 @@ class GeminiApiClient extends LlmClient {
       if (status >= 500) {
         throw NetworkError(
           'Gemini API server error (HTTP $status): $body',
+        );
+      }
+      // 404 on a cachedContent reference means the cache has expired.
+      if (status == 404 && cachedContent != null) {
+        throw CacheError(
+          'Gemini cached content not found (HTTP 404): $cachedContent',
         );
       }
       throw SchemaError(
@@ -241,6 +269,92 @@ class GeminiApiClient extends LlmClient {
       throw SchemaError(
         'Failed to extract text from Gemini SSE event: $e',
       );
+    }
+  }
+
+  @override
+  Future<String> createCachedContent({
+    required String systemInstruction,
+    required String model,
+    Duration ttl = const Duration(seconds: 300),
+  }) async {
+    final uri = Uri.parse('$_baseUrl/cachedContents');
+    final body = jsonEncode({
+      'model': 'models/$model',
+      'systemInstruction': {
+        'parts': [
+          {'text': systemInstruction},
+        ],
+      },
+      'ttl': '${ttl.inSeconds}s',
+    });
+
+    http.Response response;
+    try {
+      response = await _httpClient.post(
+        uri,
+        headers: {
+          'x-goog-api-key': apiKey,
+          'Content-Type': 'application/json',
+        },
+        body: body,
+      );
+    } on SocketException catch (e) {
+      throw CacheError('Socket error creating cached content: ${e.message}');
+    } on http.ClientException catch (e) {
+      throw CacheError(
+          'HTTP client error creating cached content: ${e.message}');
+    } on TimeoutException catch (_) {
+      throw const CacheError('Request timed out creating cached content');
+    } catch (e) {
+      throw CacheError('Unexpected error creating cached content: $e');
+    }
+
+    if (response.statusCode != 200 && response.statusCode != 201) {
+      throw CacheError(
+        'Failed to create cached content (HTTP ${response.statusCode}): '
+        '${response.body}',
+      );
+    }
+
+    final Map<String, dynamic> json;
+    try {
+      json = jsonDecode(response.body) as Map<String, dynamic>;
+    } catch (e) {
+      throw CacheError(
+          'Failed to parse createCachedContent response: $e');
+    }
+
+    final name = json['name'] as String?;
+    if (name == null) {
+      throw const CacheError(
+          'createCachedContent response missing "name" field');
+    }
+    return name;
+  }
+
+  @override
+  Future<void> deleteCachedContent(String name) async {
+    final uri = Uri.parse('$_baseUrl/$name');
+    try {
+      final response = await _httpClient.delete(
+        uri,
+        headers: {'x-goog-api-key': apiKey},
+      );
+      // 404 means it already expired — that's fine. Any other non-2xx is also
+      // swallowed since deletion is best-effort.
+      if (response.statusCode >= 200 && response.statusCode < 300) return;
+      if (response.statusCode == 404) return;
+      // Log but swallow other errors.
+      // ignore: avoid_print
+      print(
+        'GeminiApiClient: deleteCachedContent "$name" returned '
+        'HTTP ${response.statusCode} — ignored.',
+      );
+    } catch (e) {
+      // Best-effort: swallow all errors.
+      // ignore: avoid_print
+      print('GeminiApiClient: deleteCachedContent "$name" failed: $e — ignored.');
     }
   }
 }
