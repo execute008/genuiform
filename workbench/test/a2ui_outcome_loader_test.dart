@@ -319,7 +319,31 @@ void main() {
     });
   });
 
-  // ── 5. Summary format ─────────────────────────────────────────────────────
+  // ── 5. Default first-chunk timeout ────────────────────────────────────────
+
+  group('A2uiOutcomeLoader — default first-chunk timeout', () {
+    test('default constructor sets a timeout that accommodates buffered LLM clients',
+        () {
+      // Regression guard: VertexDirectClient and GeminiApiClient both buffer
+      // the entire HTTP response before yielding a single chunk, so the
+      // "first chunk" arrival time equals the entire LLM call wall-clock
+      // time. For gemini-2.5-flash with structured output, this routinely
+      // exceeds 5s. The default timeout must be generous enough to cover
+      // realistic LLM round-trips, otherwise the renderer falls back to v1.
+      final emitter = _FakeEmitter(const Stream.empty());
+      final loader = A2uiOutcomeLoader(emitter: emitter);
+
+      expect(
+        loader.firstChunkTimeout,
+        greaterThanOrEqualTo(const Duration(seconds: 30)),
+        reason: 'Default first-chunk timeout was 5s, which triggered '
+            'TimeoutException on slow first responses (e.g. Gemini AI Studio '
+            'free tier with structured output).',
+      );
+    });
+  });
+
+  // ── 6. Summary format ─────────────────────────────────────────────────────
 
   group('A2uiOutcomeLoader — summary building', () {
     test('summary with no fields is just the outcome id', () async {
