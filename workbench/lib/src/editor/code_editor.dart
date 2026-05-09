@@ -3,6 +3,8 @@ import 'package:re_editor/re_editor.dart' as re_editor;
 import 'package:re_highlight/languages/dart.dart';
 import 'package:re_highlight/styles/atom-one-dark.dart';
 
+import 'dsl_catalog.dart';
+
 /// A parse-error annotation for a specific source line.
 ///
 /// Used by [CodeEditor] to render a red error indicator in the gutter for
@@ -122,7 +124,7 @@ class _CodeEditorState extends State<CodeEditor> {
   Widget build(BuildContext context) {
     final errorLines = _errorLines;
 
-    return re_editor.CodeEditor(
+    final editor = re_editor.CodeEditor(
       controller: _controller,
       readOnly: widget.readOnly,
       showCursorWhenReadOnly: false,
@@ -169,6 +171,215 @@ class _CodeEditorState extends State<CodeEditor> {
         );
       },
     );
+
+    if (widget.readOnly) return editor;
+
+    // Wrap the editor in CodeAutocomplete so DSL primitives surface as
+    // suggestions whenever the user starts typing an identifier.
+    return re_editor.CodeAutocomplete(
+      promptsBuilder: re_editor.DefaultCodeAutocompletePromptsBuilder(
+        // language: null → don't pull in Dart's built-in keyword list. The
+        // DSL is a strict subset; only our catalog should be suggested.
+        directPrompts: [
+          for (final p in kDirectPrimitives) _DslPrompt(p),
+        ],
+        relatedPrompts: {
+          for (final entry in kRelatedPrimitives.entries)
+            entry.key: [for (final p in entry.value) _DslPrompt(p)],
+        },
+      ),
+      viewBuilder: (context, notifier, onSelected) {
+        return _AutocompleteMenu(
+          notifier: notifier,
+          onSelected: onSelected,
+        );
+      },
+      child: editor,
+    );
+  }
+}
+
+// ─── DSL prompt adapter ───────────────────────────────────────────────────────
+
+/// Adapts a [DslPrimitive] to re_editor's [re_editor.CodePrompt] surface.
+///
+/// `match` is case-sensitive `startsWith` — Dart-style — and `autocomplete`
+/// returns the primitive's snippet with the placeholder selection pre-applied.
+class _DslPrompt extends re_editor.CodePrompt {
+  _DslPrompt(this.primitive) : super(word: primitive.name);
+
+  final DslPrimitive primitive;
+
+  @override
+  re_editor.CodeAutocompleteResult get autocomplete => primitive.autocomplete;
+
+  @override
+  bool match(String input) => word != input && word.startsWith(input);
+
+  @override
+  bool operator ==(Object other) =>
+      other is _DslPrompt && other.primitive.name == primitive.name;
+
+  @override
+  int get hashCode => primitive.name.hashCode;
+}
+
+// ─── Autocomplete popup view ─────────────────────────────────────────────────
+
+class _AutocompleteMenu extends StatelessWidget
+    implements PreferredSizeWidget {
+  const _AutocompleteMenu({
+    required this.notifier,
+    required this.onSelected,
+  });
+
+  final ValueNotifier<re_editor.CodeAutocompleteEditingValue> notifier;
+  final ValueChanged<re_editor.CodeAutocompleteResult> onSelected;
+
+  // The popup has a fixed footprint so re_editor's overlay positioner can
+  // decide whether to flip it above/below the caret. Width is generous to fit
+  // the longest signature; height is sized for ~6 visible rows + the footer.
+  static const double _menuWidth = 460;
+  static const double _menuHeight = 260;
+
+  @override
+  Size get preferredSize => const Size(_menuWidth, _menuHeight);
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return SizedBox(
+      width: _menuWidth,
+      height: _menuHeight,
+      child: Material(
+        color: theme.colorScheme.surfaceContainerHighest,
+        elevation: 8,
+        borderRadius: BorderRadius.circular(6),
+        child: ValueListenableBuilder<re_editor.CodeAutocompleteEditingValue>(
+          valueListenable: notifier,
+          builder: (context, value, _) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  child: ListView.builder(
+                    padding: EdgeInsets.zero,
+                    itemCount: value.prompts.length,
+                    itemBuilder: (context, i) {
+                      final prompt = value.prompts[i];
+                      final primitive = prompt is _DslPrompt
+                          ? prompt.primitive
+                          : null;
+                      final selected = i == value.index;
+                      return InkWell(
+                        onTap: () =>
+                            onSelected(value.copyWith(index: i).autocomplete),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          color: selected
+                              ? theme.colorScheme.primary.withValues(alpha: 0.18)
+                              : null,
+                          child: Row(
+                            children: [
+                              SizedBox(
+                                width: 18,
+                                child: Icon(
+                                  _iconForGroup(primitive?.group),
+                                  size: 14,
+                                  color: theme.colorScheme.primary,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                prompt.word,
+                                style: const TextStyle(
+                                  fontFamily: 'monospace',
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  primitive?.signature ?? '',
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontFamily: 'monospace',
+                                    fontSize: 12,
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                if (value.prompts.isNotEmpty)
+                  _DescriptionFooter(
+                    primitive: value.prompts[value.index] is _DslPrompt
+                        ? (value.prompts[value.index] as _DslPrompt).primitive
+                        : null,
+                  ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _DescriptionFooter extends StatelessWidget {
+  const _DescriptionFooter({required this.primitive});
+
+  final DslPrimitive? primitive;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final text = primitive?.description ?? '';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainer,
+        border: Border(top: BorderSide(color: theme.colorScheme.outlineVariant)),
+      ),
+      child: Text(
+        text,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: theme.textTheme.bodySmall?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+      ),
+    );
+  }
+}
+
+IconData _iconForGroup(DslGroup? g) {
+  switch (g) {
+    case DslGroup.topLevel:
+      return Icons.flag_outlined;
+    case DslGroup.contract:
+      return Icons.description_outlined;
+    case DslGroup.fieldType:
+      return Icons.category_outlined;
+    case DslGroup.constraints:
+      return Icons.rule;
+    case DslGroup.posture:
+      return Icons.tune;
+    case DslGroup.outcomes:
+      return Icons.account_tree_outlined;
+    case DslGroup.handoffs:
+      return Icons.send_outlined;
+    case null:
+      return Icons.code;
   }
 }
 

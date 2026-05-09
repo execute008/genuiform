@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:genuiform/genuiform.dart';
 
 import '../editor/code_editor.dart';
+import '../editor/legend_drawer.dart';
 import '../llm/a2ui_outcome_emitter.dart';
 import '../parser/parse_dsl.dart';
 import '../persistence/url_state.dart';
@@ -64,6 +65,11 @@ class _AppShellState extends State<AppShell> {
 
   /// Last DSL value that was synced to the URL hash (avoids redundant writes).
   String _lastSyncedDsl = '';
+
+  /// Used to open the [LegendDrawer] from the AppBar action button — the
+  /// AppBar's BuildContext doesn't see the [Scaffold] above it, so we route
+  /// through a key instead of [Scaffold.of].
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   /// Emitter constructed once per session, shared across form completions.
   ///
@@ -208,6 +214,8 @@ class _AppShellState extends State<AppShell> {
             : SplitView(left: leftPane, right: rightPane);
 
         return Scaffold(
+          key: _scaffoldKey,
+          endDrawer: const LegendDrawer(),
           appBar: AppBar(
             title: const Text('genuiform workbench'),
             actions: [
@@ -272,6 +280,13 @@ class _AppShellState extends State<AppShell> {
                 tooltip: 'Reset',
                 onPressed: _runOrReset,
                 icon: const Icon(Icons.refresh),
+              ),
+
+              // ── DSL reference drawer ──────────────────────────────────────
+              IconButton(
+                tooltip: 'DSL reference',
+                onPressed: () => _scaffoldKey.currentState?.openEndDrawer(),
+                icon: const Icon(Icons.menu_book_outlined),
               ),
 
               // ── About button ──────────────────────────────────────────────
