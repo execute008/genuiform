@@ -157,7 +157,7 @@ class DslBuilder {
     return Layer(
       id: node.id,
       contractDelta: _buildContract(node.contractDelta),
-      handoff: node.handoff != null ? _resolveHandoff(node.handoff!) : null,
+      handoff: node.handoff != null ? _stubHandoff() : null,
       next: node.next != null ? _buildOutcomeNode(node.next!) : null,
     );
   }
@@ -180,39 +180,24 @@ class DslBuilder {
   }
 
   Outcome _buildOutcomeTerminal(OutcomeTerminalNode node) {
-    // Record the handoff in the side-table before building the Outcome.
     if (node.handoff != null) {
       _registerHandoff(node.id, node.handoff!);
     }
     return Outcome(
       id: node.id,
       contractDelta: _buildContract(node.contractDelta),
-      handoff: node.handoff != null ? _resolveHandoff(node.handoff!) : null,
+      handoff: node.handoff != null ? _stubHandoff() : null,
     );
   }
 
-  /// Records the [SimulatedHandoff] for [outcomeId] in the side-table without
-  /// modifying the [Outcome] itself.
+  /// Records the inline [SimulatedHandoff] for [outcomeId] in the side-table.
   void _registerHandoff(String outcomeId, HandoffStubNode node) {
-    final entry = kHandoffRegistry[node.registryKey];
-    if (entry != null) {
-      _handoffMap[outcomeId] = entry;
-    }
-    // Errors for unknown keys are already reported by [_resolveHandoff].
+    _handoffMap[outcomeId] = SimulatedHandoff(
+      label: node.label,
+      icon: node.icon ?? 'flag',
+    );
   }
 
-  Handoff? _resolveHandoff(HandoffStubNode node) {
-    final entry = kHandoffRegistry[node.registryKey];
-    if (entry == null) {
-      _errors.add(ParseError(
-        line: node.line,
-        column: node.column,
-        message: "Unknown handoff '${node.registryKey}'. "
-            "Available: ${kHandoffRegistry.keys.join(', ')}",
-      ));
-      return null;
-    }
-    // The closure is a no-op — the workbench uses the side-table for toasts.
-    return (_) {};
-  }
+  /// The closure is a no-op — the workbench uses the side-table for toasts.
+  Handoff _stubHandoff() => (_) {};
 }

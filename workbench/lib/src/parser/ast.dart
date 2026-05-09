@@ -284,15 +284,19 @@ class OutcomeTerminalNode extends OutcomeAstNode {
 // Handoff stub
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// `Handoff(onReached: someKey)` — references a registry entry by name.
+/// `Handoff(label: '...', icon: '...')` — inline definition of a simulated
+/// handoff. The builder turns this directly into a [SimulatedHandoff]; there
+/// is no registry indirection.
 class HandoffStubNode {
   const HandoffStubNode({
-    required this.registryKey,
+    required this.label,
+    this.icon,
     required this.line,
     required this.column,
   });
 
-  final String registryKey;
+  final String label;
+  final String? icon;
   final int line;
   final int column;
 }

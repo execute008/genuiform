@@ -136,7 +136,7 @@ final form = GenuiForm(
   contract: Contract(fields: {}),
   constraints: [if (true) MaxSteps(5)],
   posture: Posture.salesDiscovery(),
-  outcomes: Outcome('done', contractDelta: Contract(fields: {}), handoff: Handoff(onReached: politeDecline)),
+  outcomes: Outcome('done', contractDelta: Contract(fields: {}), handoff: Handoff(label: 'Politely decline', icon: 'logout')),
 );
 ''');
       expect(err.message, contains('if'));
@@ -172,7 +172,7 @@ final form = GenuiForm(
   contract: Contract(fields: {}),
   constraints: [MaxSteps('not-a-number')],
   posture: Posture.salesDiscovery(),
-  outcomes: Outcome('done', contractDelta: Contract(fields: {}), handoff: Handoff(onReached: politeDecline)),
+  outcomes: Outcome('done', contractDelta: Contract(fields: {}), handoff: Handoff(label: 'Politely decline', icon: 'logout')),
 );
 ''');
       expect(err.message, contains('MaxSteps'));
@@ -184,13 +184,29 @@ final form = GenuiForm(
   contract: Contract(fields: {}),
   constraints: [],
   posture: Posture.unknownPreset(),
-  outcomes: Outcome('done', contractDelta: Contract(fields: {}), handoff: Handoff(onReached: politeDecline)),
+  outcomes: Outcome('done', contractDelta: Contract(fields: {}), handoff: Handoff(label: 'Politely decline', icon: 'logout')),
 );
 ''');
       expect(err.message, contains('unknownPreset'));
     });
 
-    test('Unknown handoff key produces error from builder', () {
+    test('Handoff missing label produces parser error', () {
+      final result = parseDsl('''
+final form = GenuiForm(
+  contract: Contract(fields: {}),
+  constraints: [],
+  posture: Posture.salesDiscovery(),
+  outcomes: Outcome('done',
+    contractDelta: Contract(fields: {}),
+    handoff: Handoff(icon: 'flag'),
+  ),
+);
+''');
+      expect(result.errors, isNotEmpty);
+      expect(result.errors.first.message, contains('label'));
+    });
+
+    test('Handoff with unknown argument produces parser error', () {
       final result = parseDsl('''
 final form = GenuiForm(
   contract: Contract(fields: {}),
@@ -203,7 +219,7 @@ final form = GenuiForm(
 );
 ''');
       expect(result.errors, isNotEmpty);
-      expect(result.errors.first.message, contains('bookFoo'));
+      expect(result.errors.first.message, contains('onReached'));
     });
 
     test('Unsupported FieldSpec type produces error', () {
@@ -214,7 +230,7 @@ final form = GenuiForm(
   }),
   constraints: [],
   posture: Posture.salesDiscovery(),
-  outcomes: Outcome('done', contractDelta: Contract(fields: {}), handoff: Handoff(onReached: politeDecline)),
+  outcomes: Outcome('done', contractDelta: Contract(fields: {}), handoff: Handoff(label: 'Politely decline', icon: 'logout')),
 );
 ''');
       expect(err.message, contains('Symbol'));
@@ -226,7 +242,7 @@ final form = GenuiForm(
   contract: Contract(fields: {}),
   constraints: [BannedWords('foo')],
   posture: Posture.salesDiscovery(),
-  outcomes: Outcome('done', contractDelta: Contract(fields: {}), handoff: Handoff(onReached: politeDecline)),
+  outcomes: Outcome('done', contractDelta: Contract(fields: {}), handoff: Handoff(label: 'Politely decline', icon: 'logout')),
 );
 ''');
       expect(err.message, contains('BannedWords'));
@@ -262,7 +278,7 @@ final form = GenuiForm(
   posture: Posture.salesDiscovery(),
   outcomes: Outcome('done',
     contractDelta: Contract(fields: {}),
-    handoff: Handoff(onReached: politeDecline),
+    handoff: Handoff(label: 'Politely decline', icon: 'logout'),
   ),
 );
 ''';
@@ -284,7 +300,7 @@ final form = GenuiForm(
   posture: Posture.salesDiscovery(), // inline comment
   outcomes: Outcome('done',
     contractDelta: Contract(fields: {}),
-    handoff: Handoff(onReached: politeDecline),
+    handoff: Handoff(label: 'Politely decline', icon: 'logout'),
   ),
 );
 ''');
@@ -330,7 +346,7 @@ final form = GenuiForm(
   ),
   outcomes: Outcome('done',
     contractDelta: Contract(fields: {}),
-    handoff: Handoff(onReached: politeDecline),
+    handoff: Handoff(label: 'Politely decline', icon: 'logout'),
   ),
 );
 ''');

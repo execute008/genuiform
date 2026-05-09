@@ -4,6 +4,7 @@ import 'package:genuiform_a2ui/genuiform_a2ui.dart';
 
 import '../llm/workbench_mock_llm_client.dart';
 import 'debug_strip.dart';
+import 'icon_names.dart';
 
 /// PoC flag — when true, the form's `onComplete` callback hands over to the
 /// A2UI-driven outcome renderer instead of showing a `SnackBar`. Tracked in
@@ -331,21 +332,8 @@ class _EscalationCard extends StatelessWidget {
 
 /// Maps a [SimulatedHandoff.icon] string to a Flutter [IconData].
 ///
-/// The icon strings are the historical registry keys (kept as strings to avoid
-/// breaking parser tests). The mapping is done lazily at render time.
-IconData _iconForHandoff(SimulatedHandoff handoff) {
-  return switch (handoff.icon) {
-    'calendar' => Icons.calendar_today,
-    'mail' => Icons.mail_outline,
-    'door' => Icons.logout,
-    'home' => Icons.home_outlined,
-    'dumbbell' => Icons.fitness_center,
-    'utensils' => Icons.restaurant,
-    'scale' => Icons.monitor_weight_outlined,
-    'check' => Icons.check_circle_outline,
-    _ => Icons.flag_outlined,
-  };
-}
+/// See [iconForName] for the supported set; unknown names render as a flag.
+IconData _iconForHandoff(SimulatedHandoff handoff) => iconForName(handoff.icon);
 
 // ── Debug strip placeholder ────────────────────────────────────────────────────
 

@@ -944,24 +944,52 @@ class Parser {
     final start = _current;
     _expectIdent('Handoff');
     _expect(TokenKind.lParen, "Expected '(' after 'Handoff'");
-    _expectIdent('onReached', hint: 'Handoff syntax: Handoff(onReached: registryKey)');
-    _expect(TokenKind.colon, "Expected ':' after 'onReached'");
 
-    final keyToken = _current;
-    if (keyToken.kind != TokenKind.ident) {
-      throw ParseError(
-        line: keyToken.line,
-        column: keyToken.column,
-        message: "Expected registry key identifier after 'onReached:'",
-        hint: 'Example: Handoff(onReached: bookCalendly)',
-      );
+    String? label;
+    String? icon;
+
+    while (!_checkKind(TokenKind.rParen) && !_checkKind(TokenKind.eof)) {
+      final argName = _expectNamedArgKey();
+      switch (argName) {
+        case 'label':
+          final t = _expect(
+            TokenKind.string,
+            "Expected string literal for Handoff.label",
+            hint: "Example: Handoff(label: 'Book a call', icon: 'calendar_today')",
+          );
+          label = t.value;
+        case 'icon':
+          final t = _expect(
+            TokenKind.string,
+            "Expected string literal for Handoff.icon",
+            hint: "Example: Handoff(label: 'Book a call', icon: 'calendar_today')",
+          );
+          icon = t.value;
+        default:
+          throw ParseError(
+            line: _current.line,
+            column: _current.column,
+            message: "Unknown Handoff argument '$argName'",
+            hint: 'Valid args: label, icon',
+          );
+      }
+      _skipOptionalComma();
     }
-    _advance();
-    _skipOptionalComma();
+
     _expect(TokenKind.rParen, "Expected ')' to close Handoff(...)");
 
+    if (label == null) {
+      throw ParseError(
+        line: start.line,
+        column: start.column,
+        message: "Handoff is missing required argument 'label'",
+        hint: "Example: Handoff(label: 'Book a call', icon: 'calendar_today')",
+      );
+    }
+
     return HandoffStubNode(
-      registryKey: keyToken.value,
+      label: label,
+      icon: icon,
       line: start.line,
       column: start.column,
     );

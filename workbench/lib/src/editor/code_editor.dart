@@ -376,8 +376,8 @@ IconData _iconForGroup(DslGroup? g) {
       return Icons.tune;
     case DslGroup.outcomes:
       return Icons.account_tree_outlined;
-    case DslGroup.handoffs:
-      return Icons.send_outlined;
+    case DslGroup.icons:
+      return Icons.emoji_symbols_outlined;
     case null:
       return Icons.code;
   }

@@ -17,7 +17,7 @@
 import 'package:flutter/widgets.dart';
 import 'package:re_editor/re_editor.dart';
 
-import '../registry/handoff_registry.dart';
+import '../preview/icon_names.dart';
 
 enum DslGroup {
   topLevel('Top-level'),
@@ -26,7 +26,7 @@ enum DslGroup {
   constraints('Constraints'),
   posture('Posture'),
   outcomes('Outcomes & flow'),
-  handoffs('Handoff keys');
+  icons('Material icons');
 
   const DslGroup(this.label);
   final String label;
@@ -284,22 +284,24 @@ final List<DslPrimitive> kDslCatalog = <DslPrimitive>[
   ),
   const DslPrimitive(
     name: 'Handoff',
-    signature: 'Handoff({onReached: registryKey})',
+    signature: 'Handoff({label, icon?})',
     description:
-        'Fires the named handoff (see Handoff keys) when the node is reached.',
+        'Inline handoff fired when the node is reached. The icon is a '
+        'Material icon name (see Material icons group).',
     group: DslGroup.outcomes,
-    snippetTemplate: 'Handoff(onReached: «bookCalendly»)',
+    snippetTemplate:
+        "Handoff(label: '«Book a call»', icon: 'calendar_today')",
   ),
 
-  // ── Handoff registry keys ──────────────────────────────────────────────────
-  // Generated from the same registry the parser/builder reads.
-  for (final entry in kHandoffRegistry.entries)
+  // ── Material icon names ────────────────────────────────────────────────────
+  // Suggested as bare-identifier completions inside `icon: '...'` strings.
+  for (final name in kSupportedIconNames)
     DslPrimitive(
-      name: entry.key,
-      signature: entry.key,
-      description: '${entry.value.label} (icon: ${entry.value.icon})',
-      group: DslGroup.handoffs,
-      snippetTemplate: entry.key,
+      name: name,
+      signature: name,
+      description: 'Material icon — use as `icon: \'$name\'`.',
+      group: DslGroup.icons,
+      snippetTemplate: name,
     ),
 ];
 
@@ -339,8 +341,12 @@ Map<DslGroup, List<DslPrimitive>> get kDslCatalogByGroup {
 
 /// Primitives offered as bare-identifier completions (anything without a
 /// [DslPrimitive.relatedTo]).
-Iterable<DslPrimitive> get kDirectPrimitives =>
-    kDslCatalog.where((p) => p.relatedTo == null);
+///
+/// Icon names live inside string literals (`icon: 'calendar_today'`), not
+/// as bare identifiers, so they are excluded from inline completion. They
+/// remain visible in the legend drawer for discoverability.
+Iterable<DslPrimitive> get kDirectPrimitives => kDslCatalog
+    .where((p) => p.relatedTo == null && p.group != DslGroup.icons);
 
 /// Primitives offered after `<owner>.`, grouped by owner.
 Map<String, List<DslPrimitive>> get kRelatedPrimitives {
