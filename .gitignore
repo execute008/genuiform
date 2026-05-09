@@ -41,3 +41,4 @@ migrate_working_dir/
 # Coverage reports
 lcov.info
 .claude/
+a2ui/build

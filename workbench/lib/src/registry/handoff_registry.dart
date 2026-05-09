@@ -1,29 +1,20 @@
-/// A named, displayable representation of a handoff action.
-///
-/// Used by the workbench instead of real Dart closures — since the DSL cannot
-/// express arbitrary callback code, each `Handoff(onReached: key)` in the DSL
-/// resolves to a [SimulatedHandoff] that the preview pane turns into a toast.
-class SimulatedHandoff {
-  const SimulatedHandoff({required this.label, required this.icon});
+// Workbench handoff registry — the side-table that resolves DSL
+// `Handoff(label:, icon:)` literals into a [SimulatedHandoff] for the
+// preview pane.
+//
+// [SimulatedHandoff] itself lives in `package:genuiform_a2ui` so that both
+// the workbench and the example app share the same value type. This file
+// is a thin re-export plus the workbench-specific named handoff catalog.
 
-  /// Human-readable label shown in the workbench toast.
-  final String label;
+export 'package:genuiform_a2ui/genuiform_a2ui.dart' show SimulatedHandoff;
 
-  /// Icon name (Material icon or custom name) for the toast.
-  final String icon;
-
-  @override
-  String toString() => 'SimulatedHandoff(label: $label, icon: $icon)';
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Registry
-// ─────────────────────────────────────────────────────────────────────────────
+import 'package:genuiform_a2ui/genuiform_a2ui.dart';
 
 /// All named handoffs available for use in the workbench DSL.
 ///
-/// When a DSL snippet writes `Handoff(onReached: bookCalendly)`, the builder
-/// looks up `'bookCalendly'` here to obtain the [SimulatedHandoff] metadata.
+/// When a DSL snippet writes `Handoff(onReached: bookCalendly)`, the
+/// builder looks up `'bookCalendly'` here to obtain the [SimulatedHandoff]
+/// metadata.
 const Map<String, SimulatedHandoff> kHandoffRegistry = {
   'bookCalendly': SimulatedHandoff(
     label: 'Book a call',

@@ -1,0 +1,27 @@
+name: genuiform_a2ui
+description: "Shared A2UI v0.9 outcome-screen plumbing for genuiform — Vertex emit, transport adapter wiring, fallback rendering, action handler. Used by genuiform_workbench and the example app."
+publish_to: 'none'
+version: 0.1.0-dev
+
+environment:
+  sdk: ^3.11.5
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  genuiform:
+    path: ../
+
+  # A2UI v0.9 SDK from Google. Pinned exactly (no caret) for the May 9 2026
+  # hackathon — see A2UI_AGENDA.md and A2UI_C_V2_SPEC.md §5.5.
+  genui: 0.9.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

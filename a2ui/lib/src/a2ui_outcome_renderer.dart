@@ -1,11 +1,26 @@
-// Renders a per-outcome handoff screen via Google's `genui` SDK.
+// Renders a per-outcome handoff screen via the `genui` SDK.
 //
-// Ported from `workbench/lib/src/preview/a2ui_outcome_renderer.dart`. See that
-// file for the full description of the stream / fallback paths and why we
-// subscribe to `A2uiTransportAdapter.incomingMessages`. The example renderer
-// differs from the workbench by:
-//   - using [kA2uiRestartAction] (`example/restart`) for the in-Surface Button
-//   - simpler footer copy (no debug-only Restart safety net)
+// ─── Stream path (a2uiMessageStream != null) ────────────────────────────────
+//
+// Each text chunk from the stream is fed into
+// [genui.A2uiTransportAdapter.addChunk]. Parsed [genui.A2uiMessage]s are
+// emitted on the adapter's `incomingMessages` stream and forwarded to
+// [genui.SurfaceController.handleMessage] — exactly the pattern used by
+// [genui.Conversation].
+//
+// ─── Fallback path ──────────────────────────────────────────────────────────
+//
+// If [a2uiMessageStream] is null, errors, or completes without dispatching
+// any messages, a hand-crafted v1 [genui.CreateSurface] +
+// [genui.UpdateComponents] pair is dispatched directly. The fallback tree
+// includes a Button with the configured restart action so the in-Surface
+// Restart still works regardless of which path rendered.
+//
+// ─── Action handler ─────────────────────────────────────────────────────────
+//
+// [A2uiActionHandler] is created in [initState] and wired before any
+// messages are dispatched. It subscribes to [SurfaceController.onSubmit]
+// and calls [onRestart] when the configured action arrives.
 
 import 'dart:async';
 
@@ -17,26 +32,40 @@ import 'a2ui_action_handler.dart';
 import 'a2ui_outcome_prompt.dart';
 import 'simulated_handoff.dart';
 
-/// Renders a per-outcome handoff screen via the `genui` SDK.
-///
-/// When [a2uiMessageStream] is non-null, chunks are fed into a
-/// [genui.A2uiTransportAdapter] and the parsed `A2uiMessage`s are forwarded
-/// to a [genui.SurfaceController]. When the stream is null, errors, or
-/// completes without dispatching any messages, a hand-crafted v1 tree is
-/// dispatched directly so the user always sees an outcome screen.
+/// Renders a per-outcome handoff screen via Google's `genui` SDK.
 class A2uiOutcomeRenderer extends StatefulWidget {
   const A2uiOutcomeRenderer({
     required this.outcomeId,
     required this.handoff,
     required this.onRestart,
     this.a2uiMessageStream,
+    this.restartActionName = kA2uiRestartAction,
+    this.showDebugRestartButton = true,
     super.key,
   });
 
   final String outcomeId;
+
+  /// May be `null` if no handoff was registered for this outcome — the
+  /// renderer's fallback tree still produces a generic "Form completed"
+  /// screen in that case.
   final SimulatedHandoff? handoff;
+
   final VoidCallback onRestart;
+
+  /// When non-null, chunks from this stream are fed into the transport
+  /// adapter. When null (or when the stream errors / completes empty),
+  /// the v1 hand-crafted tree is dispatched.
   final Stream<String>? a2uiMessageStream;
+
+  /// Action name routed to [onRestart] both inside the LLM-emitted tree
+  /// and inside the fallback tree. Defaults to [kA2uiRestartAction].
+  final String restartActionName;
+
+  /// When true and [kDebugMode] is on, shows a secondary "Restart (debug)"
+  /// button below the Surface as a safety net. Workbench enables this;
+  /// release-style deployments may want it off.
+  final bool showDebugRestartButton;
 
   @override
   State<A2uiOutcomeRenderer> createState() => _A2uiOutcomeRendererState();
@@ -65,6 +94,7 @@ class _A2uiOutcomeRendererState extends State<A2uiOutcomeRenderer> {
     _actionHandler = A2uiActionHandler(
       controller: _controller,
       onRestart: widget.onRestart,
+      actionName: widget.restartActionName,
     );
     _actionHandler.start();
 
@@ -107,14 +137,15 @@ class _A2uiOutcomeRendererState extends State<A2uiOutcomeRenderer> {
         _applyFallback();
       },
       onDone: () {
-        // The A2uiParserTransformer pipeline delivers parsed events on the
-        // next microtask cycle, so defer the "no messages" check.
+        // The A2uiParserTransformer pipeline delivers parsed events on
+        // the next microtask cycle; defer the "no messages" check by one
+        // microtask so any pending dispatch can reach _receivedAnyMessage.
         Future<void>.microtask(() {
           if (!mounted) return;
           if (!_receivedAnyMessage) {
             debugPrint(
-              'A2uiOutcomeRenderer: stream completed with no messages '
-              '— falling back to v1 tree.',
+              'A2uiOutcomeRenderer: stream completed with no messages — '
+              'falling back to v1 tree.',
             );
             _applyFallback();
           }
@@ -129,8 +160,6 @@ class _A2uiOutcomeRendererState extends State<A2uiOutcomeRenderer> {
     _seedFallbackSurface();
   }
 
-  /// Hand-crafted v1 tree dispatched when the live LLM emit path is
-  /// unavailable (no key, mock client, error, or timeout).
   void _seedFallbackSurface() {
     _controller.handleMessage(
       genui.CreateSurface(
@@ -172,14 +201,14 @@ class _A2uiOutcomeRendererState extends State<A2uiOutcomeRenderer> {
             type: 'Text',
             properties: {'text': 'Restart form'},
           ),
-          const genui.Component(
+          genui.Component(
             id: 'restart_btn',
             type: 'Button',
             properties: {
               'child': 'restart_label',
               'variant': 'primary',
               'action': {
-                'event': {'name': kA2uiRestartAction},
+                'event': {'name': widget.restartActionName},
               },
             },
           ),
@@ -191,9 +220,9 @@ class _A2uiOutcomeRendererState extends State<A2uiOutcomeRenderer> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final showFallbackFooter = kDebugMode && _usedFallback;
+    final showFallbackBadge = kDebugMode && _usedFallback;
     final footerText = _usedFallback
-        ? 'fallback A2UI tree (no live emit)'
+        ? 'fallback A2UI tree (LLM emit unavailable)'
         : 'rendered live by Vertex via flutter/genui (A2UI v0.9)';
     final footerIcon =
         _usedFallback ? Icons.warning_amber_rounded : Icons.electric_bolt;
@@ -203,7 +232,7 @@ class _A2uiOutcomeRendererState extends State<A2uiOutcomeRenderer> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (showFallbackFooter)
+          if (showFallbackBadge)
             Container(
               color: theme.colorScheme.errorContainer,
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 6),
@@ -216,7 +245,7 @@ class _A2uiOutcomeRendererState extends State<A2uiOutcomeRenderer> {
                   ),
                   const SizedBox(width: 6),
                   Text(
-                    'fallback (no live emit)',
+                    'fallback (LLM emit failed)',
                     style: theme.textTheme.labelSmall?.copyWith(
                       color: theme.colorScheme.onErrorContainer,
                     ),
@@ -253,7 +282,7 @@ class _A2uiOutcomeRendererState extends State<A2uiOutcomeRenderer> {
               ],
             ),
           ),
-          if (kDebugMode)
+          if (kDebugMode && widget.showDebugRestartButton)
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
               child: OutlinedButton.icon(

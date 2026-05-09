@@ -1,6 +1,6 @@
 import 'package:genuiform/genuiform.dart';
+import 'package:genuiform_a2ui/genuiform_a2ui.dart';
 
-import '../a2ui/simulated_handoff.dart';
 import 'freelance_qualification.dart' show ScenarioSpec;
 
 // ---------------------------------------------------------------------------

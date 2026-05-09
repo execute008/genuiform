@@ -137,14 +137,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.0.2"
-  cupertino_icons:
-    dependency: "direct main"
-    description:
-      name: cupertino_icons
-      sha256: "41e005c33bd814be4d3096aff55b1908d419fde52ca656c8c47719ec745873cd"
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.0.9"
   decimal:
     dependency: transitive
     description:
@@ -249,7 +241,7 @@ packages:
     source: hosted
     version: "0.2.3"
   genui:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: genui
       sha256: be0d9d689e15991c43ef6f1f6aa45a3bdea1ffe2a2259ac0ab38881cf8f346dd
@@ -260,13 +252,6 @@ packages:
     dependency: "direct main"
     description:
       path: ".."
-      relative: true
-    source: path
-    version: "0.1.0-dev"
-  genuiform_a2ui:
-    dependency: "direct main"
-    description:
-      path: "../a2ui"
       relative: true
     source: path
     version: "0.1.0-dev"

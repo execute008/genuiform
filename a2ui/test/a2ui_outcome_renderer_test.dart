@@ -17,7 +17,7 @@
 //
 //   5. In-Surface Restart smoke test
 //      — In the v1 fallback tree, the in-Surface Button with
-//        `workbench/restart` action fires onRestart.
+//        `genuiform/restart` action fires onRestart.
 //
 // NOTE: kDebugMode is true in flutter_test environments, so assertions about
 // the "fallback (LLM emit failed)" badge will be visible in tests.
@@ -30,8 +30,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:genui/genui.dart' as genui;
 
-import 'package:genuiform_workbench/src/preview/a2ui_outcome_renderer.dart';
-import 'package:genuiform_workbench/src/registry/handoff_registry.dart';
+import 'package:genuiform_a2ui/genuiform_a2ui.dart';
 
 // ─── Test constants ───────────────────────────────────────────────────────────
 
@@ -55,7 +54,7 @@ const String _kUpdateComponentsChunk =
     '{"version":"v0.9","updateComponents":{"surfaceId":"outcome_book_call","components":[{"id":"root","component":"Column","properties":{"children":["headline","restart_btn"]}},'
     '{"id":"headline","component":"Text","properties":{"text":"Book a call","variant":"h2"}},'
     '{"id":"restart_label","component":"Text","properties":{"text":"Restart"}},'
-    '{"id":"restart_btn","component":"Button","properties":{"child":"restart_label","variant":"primary","action":{"event":{"name":"workbench/restart"}}}}]}}';
+    '{"id":"restart_btn","component":"Button","properties":{"child":"restart_label","variant":"primary","action":{"event":{"name":"genuiform/restart"}}}}]}}';
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
 
@@ -203,7 +202,7 @@ void main() {
     // ── 5. In-Surface Restart smoke test (fallback tree) ─────────────────────
     //
     // Verifies that the fallback v1 tree includes the Button with
-    // workbench/restart action and that tapping it fires onRestart via
+    // genuiform/restart action and that tapping it fires onRestart via
     // A2uiActionHandler.
     testWidgets(
       'tapping the in-surface Restart button in the fallback tree fires onRestart',
@@ -223,11 +222,12 @@ void main() {
 
         await tester.pumpAndSettle();
 
-        // The fallback tree includes a Text node "Restart" as the button label.
-        expect(find.text('Restart'), findsAtLeastNWidgets(1));
+        // The fallback tree includes a Text node "Restart form" as the
+        // button label (matching the prompt's recommended copy).
+        expect(find.text('Restart form'), findsAtLeastNWidgets(1));
 
         // Tap the Restart text (which is the child of the restart_btn Button).
-        await tester.tap(find.text('Restart').first);
+        await tester.tap(find.text('Restart form').first);
         await tester.pump();
 
         // Allow the A2uiActionHandler's stream listener to fire.

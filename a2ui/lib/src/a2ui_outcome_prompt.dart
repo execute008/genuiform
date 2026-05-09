@@ -1,28 +1,50 @@
 // Prompt template + Vertex `responseSchema` for asking Gemini to emit an
-// A2UI v0.9 outcome screen. Ported from
-// `workbench/lib/src/prompts/a2ui_outcome_prompt.dart` with the action name
-// changed from `workbench/restart` to `example/restart`.
+// A2UI v0.9 outcome screen.
 //
-// See workbench prompt file for the full design rationale (single-object
-// schema vs prefixItems, single Vertex call vs two, etc.).
+// ─── Schema approach ────────────────────────────────────────────────────────
+//
+// CHOSEN: a single JSON object with two required top-level keys —
+//   { "createSurface": { ... }, "updateComponents": { ... } }
+//
+// Vertex's structured-output validator does not reliably honour
+// `prefixItems` (the schema mechanism for an ordered tuple), so a
+// two-element array with discriminated union shapes is not viable.
+// `oneOf` over array items would also accept arrays in any order or with
+// any mix of message kinds, which defeats the purpose. The flat
+// two-property object is cleanly expressible and lets Vertex reason about
+// both halves coherently in a single call. The caller
+// ([A2uiOutcomeEmitter]) reconstructs the two A2UI wire envelopes by
+// wrapping each payload with `{"version":"v0.9", ...}`.
 
 import 'simulated_handoff.dart';
 
-/// The catalogId for BasicCatalogItems — canonical URL defined in `genui`'s
-/// `primitives/constants.dart`.
+/// Catalog identifier for the A2UI v0.9 BasicCatalogItems set.
 const String kA2uiBasicCatalogId =
     'https://a2ui.org/specification/v0_9/basic_catalog.json';
 
-/// The surface ID used for all outcome screens.
+/// Surface ID used for outcome screens.  Must be consistent across the
+/// `createSurface` and `updateComponents` messages emitted by
+/// [A2uiOutcomeEmitter].
 const String kA2uiOutcomeSurfaceId = 'outcome_surface';
 
-/// Action name carried by the in-Surface Restart Button. The
-/// [A2uiActionHandler] listens for this name and fires the page's restart
-/// callback when it arrives.
-const String kA2uiRestartAction = 'example/restart';
+/// Default action name carried by the in-Surface Restart Button.
+///
+/// Both consumers (workbench, example) use this canonical name. Keeping it
+/// shared lets the prompt, the renderer's fallback tree, and the action
+/// handler stay in lockstep without per-consumer plumbing.
+const String kA2uiRestartAction = 'genuiform/restart';
 
-/// Builds the system prompt that instructs Vertex to emit A2UI v0.9 JSON for
-/// the terminal outcome screen.
+/// Builds the system prompt that instructs Vertex to emit A2UI v0.9 JSON
+/// for the terminal outcome screen.
+///
+/// The returned string is passed verbatim as `systemInstruction` to
+/// [LlmClient.generate]. It tells the model:
+/// - What JSON shape to produce (matching [a2uiOutcomeResponseSchema]).
+/// - Which catalog to use and what components are allowed.
+/// - That the Button with id `restart_btn` must carry the
+///   [kA2uiRestartAction] action so the handler can route it back.
+/// - Hard prohibitions: no interpolation, no conditionals, no free-form
+///   text outside the schema, no deviation from the v0.9 message shape.
 String buildA2uiOutcomePrompt({
   required String outcomeId,
   required SimulatedHandoff? handoff,
@@ -138,9 +160,15 @@ Produce the JSON object now.
 ''';
 }
 
-/// Vertex AI `responseSchema` constraining the model to emit the combined
-/// createSurface + updateComponents object described in
+/// Returns a Vertex AI `responseSchema` that constrains the model to emit
+/// the combined `createSurface` + `updateComponents` object described in
 /// [buildA2uiOutcomePrompt].
+///
+/// `components` is intentionally permissive: each item is an object with a
+/// required `component` (one of the catalog enum values) and `id`, plus
+/// any of the basic catalog's properties. A strict `oneOf` discriminator
+/// over each component type is omitted because Vertex's schema validator
+/// does not reliably honour deep `oneOf` branches in array items.
 Map<String, dynamic> a2uiOutcomeResponseSchema() => {
       'type': 'object',
       'required': ['createSurface', 'updateComponents'],
@@ -184,7 +212,7 @@ Map<String, dynamic> a2uiOutcomeResponseSchema() => {
                       'List',
                     ],
                   },
-                  // Layout
+                  // Layout (Column / Row)
                   'justify': {'type': 'string'},
                   'align': {'type': 'string'},
                   'children': {

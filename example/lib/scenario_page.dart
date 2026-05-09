@@ -1,10 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:genuiform/genuiform.dart';
+import 'package:genuiform_a2ui/genuiform_a2ui.dart';
 
-import 'a2ui/a2ui_outcome_emitter.dart';
-import 'a2ui/a2ui_outcome_loader.dart';
-import 'a2ui/a2ui_outcome_renderer.dart';
-import 'a2ui/simulated_handoff.dart';
 import 'scenarios/freelance_qualification.dart' show ScenarioSpec;
 
 /// Hosts a [GenuiForm] built from a [ScenarioSpec] and routes form

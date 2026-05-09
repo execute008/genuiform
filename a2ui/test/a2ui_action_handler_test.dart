@@ -1,7 +1,7 @@
 // Tests for workbench/lib/src/preview/a2ui_action_handler.dart
 //
 // Covers Phase 3 of the A2UI v2 spec (§4.3):
-//   1. Positive: tapping a Button with action `workbench/restart` fires onRestart.
+//   1. Positive: tapping a Button with action `genuiform/restart` fires onRestart.
 //   2. Negative: tapping a Button with action `workbench/other` does NOT fire onRestart.
 //
 // The test drives a real `genui.SurfaceController` + `genui.Surface` widget so
@@ -17,7 +17,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:genui/genui.dart' as genui;
 
-import 'package:genuiform_workbench/src/preview/a2ui_action_handler.dart';
+import 'package:genuiform_a2ui/genuiform_a2ui.dart';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -30,7 +30,7 @@ const _kLabelId = 'restart_label';
 const _kOtherButtonId = 'other_btn';
 const _kOtherLabelId = 'other_label';
 
-/// Builds the complete surface with two buttons: one `workbench/restart` and
+/// Builds the complete surface with two buttons: one `genuiform/restart` and
 /// one `workbench/other`.
 void _seedTwoButtonSurface(genui.SurfaceController controller) {
   controller.handleMessage(
@@ -59,7 +59,7 @@ void _seedTwoButtonSurface(genui.SurfaceController controller) {
             'child': _kLabelId,
             'variant': 'primary',
             'action': {
-              'event': {'name': 'workbench/restart'},
+              'event': {'name': 'genuiform/restart'},
             },
           },
         ),
@@ -110,7 +110,7 @@ void main() {
 
     // ── Positive case ─────────────────────────────────────────────────────────
     testWidgets(
-      'fires onRestart exactly once when the workbench/restart button is tapped',
+      'fires onRestart exactly once when the genuiform/restart button is tapped',
       (WidgetTester tester) async {
         _seedTwoButtonSurface(controller);
 
@@ -179,7 +179,7 @@ void main() {
       // manually call handleUiEvent to put a message on onSubmit.
       controller.handleUiEvent(
         genui.UserActionEvent(
-          name: 'workbench/restart',
+          name: 'genuiform/restart',
           sourceComponentId: 'fake_btn',
         ),
       );
@@ -200,7 +200,7 @@ void main() {
 
       controller.handleUiEvent(
         genui.UserActionEvent(
-          name: 'workbench/restart',
+          name: 'genuiform/restart',
           sourceComponentId: 'fake_btn',
         ),
       );

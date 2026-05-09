@@ -15,9 +15,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:genuiform/genuiform.dart';
 
-import 'package:genuiform_workbench/src/llm/a2ui_outcome_emitter.dart';
-import 'package:genuiform_workbench/src/prompts/a2ui_outcome_prompt.dart';
-import 'package:genuiform_workbench/src/registry/handoff_registry.dart';
+import 'package:genuiform_a2ui/genuiform_a2ui.dart';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -39,7 +37,7 @@ const String _kValidVertexResponse = '''
       {"id": "headline", "component": "Text", "text": "Book a call", "variant": "h2"},
       {"id": "restart_label", "component": "Text", "text": "Restart form"},
       {"id": "restart_btn", "component": "Button", "child": "restart_label",
-       "variant": "primary", "action": {"event": {"name": "workbench/restart"}}}
+       "variant": "primary", "action": {"event": {"name": "genuiform/restart"}}}
     ]
   }
 }
@@ -380,6 +378,76 @@ void main() {
             .toList();
 
         expect(chunks, hasLength(2));
+      });
+    });
+
+    // ── Runaway upstream guard ────────────────────────────────────────────────
+    //
+    // Regression: gemini-3-flash-preview occasionally goes degenerate and
+    // streams the same digit forever inside a numeric literal (e.g.
+    // `"weight":1.01121111…`). The buffer-then-parse emitter has no notion of
+    // "this stream is producing garbage" so it accumulates indefinitely and
+    // the loader's first-chunk timer fires with a misleading "first chunk did
+    // not arrive within Ns" message. The cap turns that into an accurate
+    // SchemaError originating at the emitter, and bounds memory.
+    group('runaway upstream guard', () {
+      test('throws SchemaError once buffered text exceeds maxBufferBytes',
+          () async {
+        // 32 deltas × 1024 chars = 32 KB > 16 KB cap.
+        final delta = '1' * 1024;
+        final client = _StreamingLlmClient(List<String>.filled(32, delta));
+        final emitter = A2uiOutcomeEmitter(
+          client: client,
+          maxBufferBytes: 16 * 1024,
+        );
+
+        Object? caught;
+        try {
+          await emitter
+              .emit(outcomeId: 'x', handoff: null, summary: '')
+              .toList();
+        } catch (e) {
+          caught = e;
+        }
+
+        expect(caught, isA<SchemaError>());
+        expect(
+          (caught as SchemaError).toString(),
+          contains('exceeded'),
+          reason: 'Error must name the real cause (runaway upstream), not a '
+              'misleading downstream symptom.',
+        );
+      });
+
+      test('does not throw when buffered text stays within maxBufferBytes',
+          () async {
+        // The valid response is well under 16 KB.
+        final fake = FakeLlmClient(
+          scriptedResponses: [_kValidVertexResponse],
+        );
+        final emitter = A2uiOutcomeEmitter(
+          client: fake,
+          maxBufferBytes: 16 * 1024,
+        );
+
+        final chunks = await emitter
+            .emit(outcomeId: 'x', handoff: null, summary: '')
+            .toList();
+
+        expect(chunks, hasLength(2));
+      });
+
+      test('default maxBufferBytes is generous enough for normal envelopes',
+          () async {
+        // Normal A2UI envelopes are 5–20 KB. The default must clear that with
+        // headroom; 64 KB minimum is the contract.
+        final emitter = A2uiOutcomeEmitter(
+          client: _ErrorLlmClient(const SchemaError('unused')),
+        );
+        expect(
+          emitter.maxBufferBytes,
+          greaterThanOrEqualTo(64 * 1024),
+        );
       });
     });
 

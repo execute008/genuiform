@@ -17,9 +17,7 @@ import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:genuiform/genuiform.dart';
 
-import 'package:genuiform_workbench/src/llm/a2ui_outcome_emitter.dart';
-import 'package:genuiform_workbench/src/preview/a2ui_outcome_loader.dart';
-import 'package:genuiform_workbench/src/registry/handoff_registry.dart';
+import 'package:genuiform_a2ui/genuiform_a2ui.dart';
 
 // ─── Fake emitter helpers ─────────────────────────────────────────────────────
 
@@ -35,8 +33,34 @@ class _FakeEmitter extends A2uiOutcomeEmitter {
     required String outcomeId,
     required SimulatedHandoff? handoff,
     required String summary,
+    void Function()? onDelta,
   }) =>
       _stream;
+}
+
+/// Fake emitter that simulates the buffer-then-yield pattern: it produces no
+/// chunks but invokes [onDelta] each time a controller adds. Used to exercise
+/// the loader's inactivity watchdog without involving real LLM clients.
+class _DeltaSimEmitter extends A2uiOutcomeEmitter {
+  _DeltaSimEmitter() : super(client: _NoopLlmClient());
+
+  final StreamController<void> deltas = StreamController<void>.broadcast();
+
+  @override
+  Stream<String> emit({
+    required String outcomeId,
+    required SimulatedHandoff? handoff,
+    required String summary,
+    void Function()? onDelta,
+  }) async* {
+    final sub = deltas.stream.listen((_) => onDelta?.call());
+    try {
+      // Wait forever — caller cancels via subscription.cancel().
+      await Completer<void>().future;
+    } finally {
+      await sub.cancel();
+    }
+  }
 }
 
 /// An [LlmClient] that should never be called (constructor requirement for
@@ -66,6 +90,7 @@ class _CaptureSummaryEmitter extends A2uiOutcomeEmitter {
     required String outcomeId,
     required SimulatedHandoff? handoff,
     required String summary,
+    void Function()? onDelta,
   }) {
     capturedSummary = summary;
     capturedHandoff = handoff;
@@ -319,6 +344,95 @@ void main() {
     });
   });
 
+  // ── 4b. Inactivity watchdog ───────────────────────────────────────────────
+  //
+  // Independent of "first chunk arrived?", the loader must distinguish a
+  // silent stall (no upstream deltas) from steady-but-unproductive streaming.
+  // The emitter signals upstream activity via an `onDelta` callback; the
+  // loader resets its inactivity timer on each call.
+  group('A2uiOutcomeLoader — inactivity watchdog', () {
+    test('fires TimeoutException when emitter delivers no deltas', () async {
+      final emitter = _DeltaSimEmitter();
+      addTearDown(emitter.deltas.close);
+      final loader = A2uiOutcomeLoader.withTimeout(
+        emitter: emitter,
+        firstChunkTimeout: const Duration(seconds: 30),
+        inactivityTimeout: const Duration(milliseconds: 80),
+      );
+
+      final caught = Completer<Object>();
+      loader
+          .load(outcomeId: 'x', handoff: null, result: _result())
+          .listen(
+            (_) {},
+            onError: caught.complete,
+            cancelOnError: true,
+          );
+
+      final err = await caught.future;
+      expect(err, isA<TimeoutException>());
+      expect(
+        (err as TimeoutException).message,
+        contains('no LLM activity'),
+        reason:
+            'Inactivity timeout must use a message that names the real cause '
+            '(no deltas) rather than the misleading "first chunk".',
+      );
+    });
+
+    test('does not fire while deltas keep arriving', () async {
+      final emitter = _DeltaSimEmitter();
+      addTearDown(emitter.deltas.close);
+      // Inactivity = 80ms, but we'll add() every 30ms, so timer keeps
+      // resetting for the duration of the test.
+      final loader = A2uiOutcomeLoader.withTimeout(
+        emitter: emitter,
+        firstChunkTimeout: const Duration(seconds: 30),
+        inactivityTimeout: const Duration(milliseconds: 80),
+      );
+
+      final caught = Completer<Object>();
+      final sub = loader
+          .load(outcomeId: 'x', handoff: null, result: _result())
+          .listen(
+            (_) {},
+            onError: caught.complete,
+            cancelOnError: true,
+          );
+      addTearDown(sub.cancel);
+
+      // Pump 8 deltas at 30ms intervals → 240ms elapsed. With an 80ms
+      // inactivity timeout, the watchdog would have fired ≥3× without resets.
+      for (var i = 0; i < 8; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+        emitter.deltas.add(null);
+      }
+
+      // Verify watchdog has NOT fired despite > inactivityTimeout total time.
+      expect(caught.isCompleted, isFalse);
+    });
+
+    test('default inactivityTimeout is set on the no-arg constructor', () {
+      // Regression guard: the default-args constructor must wire up an
+      // inactivity timeout (the caller doesn't have to specify one).
+      final loader = A2uiOutcomeLoader(emitter: _FakeEmitter(const Stream.empty()));
+      expect(
+        loader.inactivityTimeout,
+        greaterThan(Duration.zero),
+        reason:
+            'Default inactivity watchdog must be enabled, not Duration.zero.',
+      );
+      expect(
+        loader.inactivityTimeout,
+        lessThanOrEqualTo(const Duration(seconds: 30)),
+        reason:
+            'Default inactivity timeout should be tighter than the total '
+            'first-chunk deadline so silent stalls fail before steady-streaming '
+            'degeneracy hits the outer cap.',
+      );
+    });
+  });
+
   // ── 5. Default first-chunk timeout ────────────────────────────────────────
 
   group('A2uiOutcomeLoader — default first-chunk timeout', () {
@@ -327,7 +441,7 @@ void main() {
       // Regression guard: VertexDirectClient and GeminiApiClient both buffer
       // the entire HTTP response before yielding a single chunk, so the
       // "first chunk" arrival time equals the entire LLM call wall-clock
-      // time. For gemini-2.5-flash with structured output, this routinely
+      // time. For gemini-flash-latest with structured output, this routinely
       // exceeds 5s. The default timeout must be generous enough to cover
       // realistic LLM round-trips, otherwise the renderer falls back to v1.
       final emitter = _FakeEmitter(const Stream.empty());

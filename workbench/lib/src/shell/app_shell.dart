@@ -3,10 +3,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:genuiform/genuiform.dart';
+import 'package:genuiform_a2ui/genuiform_a2ui.dart';
 
 import '../editor/code_editor.dart';
 import '../editor/legend_drawer.dart';
-import '../llm/a2ui_outcome_emitter.dart';
 import '../parser/parse_dsl.dart';
 import '../persistence/url_state.dart';
 import '../preview/form_preview.dart';

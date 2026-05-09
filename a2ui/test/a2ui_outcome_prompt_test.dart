@@ -12,8 +12,7 @@
 // ignore_for_file: lines_longer_than_80_chars
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:genuiform_workbench/src/prompts/a2ui_outcome_prompt.dart';
-import 'package:genuiform_workbench/src/registry/handoff_registry.dart';
+import 'package:genuiform_a2ui/genuiform_a2ui.dart';
 
 // ─── Inline schema validation helpers ────────────────────────────────────────
 
@@ -125,7 +124,7 @@ Map<String, dynamic> _positiveSample() => {
             'child': 'restart_label',
             'variant': 'primary',
             'action': {
-              'event': {'name': 'workbench/restart'},
+              'event': {'name': 'genuiform/restart'},
             },
           },
         ],
@@ -256,14 +255,14 @@ void main() {
       expect(prompt, contains('"root"'));
     });
 
-    test('specifies the restart_btn action as workbench/restart', () {
+    test('specifies the restart_btn action as genuiform/restart', () {
       final prompt = buildA2uiOutcomePrompt(
         outcomeId: 'any',
         handoff: null,
         summary: '',
       );
       expect(prompt, contains('restart_btn'));
-      expect(prompt, contains('workbench/restart'));
+      expect(prompt, contains('genuiform/restart'));
     });
 
     test('includes the session summary in the prompt', () {

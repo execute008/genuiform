@@ -1,11 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:genuiform/genuiform.dart';
+import 'package:genuiform_a2ui/genuiform_a2ui.dart';
 
-import '../llm/a2ui_outcome_emitter.dart';
 import '../llm/workbench_mock_llm_client.dart';
-import '../registry/handoff_registry.dart';
-import 'a2ui_outcome_loader.dart';
-import 'a2ui_outcome_renderer.dart';
 import 'debug_strip.dart';
 
 /// PoC flag — when true, the form's `onComplete` callback hands over to the

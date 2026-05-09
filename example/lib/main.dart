@@ -2,8 +2,8 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:genuiform/genuiform.dart';
+import 'package:genuiform_a2ui/genuiform_a2ui.dart';
 
-import 'a2ui/a2ui_outcome_emitter.dart';
 import 'api_key_panel.dart';
 import 'scenario_page.dart';
 import 'scenarios/freelance_qualification.dart';

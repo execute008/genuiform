@@ -1,6 +1,5 @@
 import 'package:genuiform/genuiform.dart';
-
-import '../a2ui/simulated_handoff.dart';
+import 'package:genuiform_a2ui/genuiform_a2ui.dart';
 
 // ---------------------------------------------------------------------------
 // Freelance lead qualification — spec §11.1
