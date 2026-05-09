@@ -100,6 +100,14 @@ abstract class Session with _$Session {
     /// The terminal [Outcome] reached; non-null only when
     /// [status] is [SessionStatus.completed].
     @_NullableOutcomeConverter() Outcome? reachedOutcome,
+
+    /// ID of the [Layer] whose exit was just offered to the user.
+    ///
+    /// Set when the LLM emits `offer_exit` for a layer. Cleared once the user
+    /// responds (accepted → `complete`; declined → next `ask_step`). The
+    /// [PromptBuilder] surfaces this as `pending_exit_layer` in `[CONTEXT]`
+    /// so the LLM knows to emit `complete` (not re-offer) on acceptance.
+    String? pendingExitLayerId,
   }) = _Session;
 
   factory Session.fromJson(Map<String, dynamic> json) =>

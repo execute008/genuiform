@@ -31,13 +31,19 @@ sealed class StepEvent {
 
 /// The LLM has produced the next step to show the user.
 class StepReady extends StepEvent {
-  const StepReady({required this.spec});
+  const StepReady({required this.spec, this.isExitOffer = false});
 
   /// The step specification to render.
   final QuizStepSpec spec;
 
+  /// Whether this step is an exit-offer question (from an `offer_exit` turn).
+  ///
+  /// When `true`, the [FormController] preserves [Session.pendingExitLayerId]
+  /// rather than clearing it — the exit offer is still pending.
+  final bool isExitOffer;
+
   @override
-  String toString() => 'StepReady(spec: $spec)';
+  String toString() => 'StepReady(spec: $spec, isExitOffer: $isExitOffer)';
 }
 
 /// The running contract for the current [Layer] is fully satisfied — the
