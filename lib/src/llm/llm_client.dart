@@ -2,17 +2,18 @@ import '../models/message.dart';
 
 /// Abstract transport layer for Vertex AI Gemini.
 ///
-/// All concrete implementations — [VertexDirectClient], [VertexProxyClient],
-/// [FakeLlmClient] — implement this interface so strategy code can swap
-/// transports without modification.
+/// All concrete implementations — [VertexDirectClient], [GeminiApiClient],
+/// [VertexProxyClient], [FakeLlmClient] — implement this interface so strategy
+/// code can swap transports without modification.
 ///
-/// [generate] always returns a [Stream<String>]. For the current v0.1 buffering
-/// approach the stream emits a single element (the complete JSON response once
-/// all chunks have been buffered). Streaming fragment-render is deferred to v2
-/// (see spec §15).
+/// [generate] returns a [Stream<String>] of incremental text deltas — typically
+/// one yield per upstream SSE event. Consumers must accumulate the deltas into
+/// a buffer and parse the concatenated text as JSON.
 abstract class LlmClient {
   /// Sends a generation request to the underlying model and returns a stream
-  /// that emits the complete JSON response.
+  /// of incremental text deltas. Deltas concatenate to form the final JSON
+  /// response — consumers are expected to accumulate them and parse the
+  /// resulting buffer themselves.
   ///
   /// Parameters:
   /// - [systemPrompt] — injected as `systemInstruction` in the Vertex payload.
