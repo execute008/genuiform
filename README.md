@@ -380,9 +380,13 @@ abstract class LlmClient {
 }
 ```
 
-### VertexDirectClient — for hackathon and dev
+### GeminiApiClient — for hackathon and dev
 
-Calls Vertex AI directly with an API key. Never ship in a mobile app — for demos and server-side usage.
+Calls Google AI Studio's Gemini API directly with a static `AIza...` key. Fine for demos, hackathon runs, and server-side usage. For shipped Flutter apps, use `VertexProxyClient` or wrap `FirebaseVertexAI.instance` instead.
+
+```dart
+final client = GeminiApiClient(apiKey: 'AIza...');
+```
 
 ### VertexProxyClient — for production (GymGeist via Firebase Functions)
 
@@ -396,6 +400,10 @@ final client = VertexProxyClient(
 ```
 
 Reference Firebase Function (TypeScript) ships in `examples/firebase-proxy/`. ~30 lines.
+
+### Vertex AI from a Flutter client — go through Firebase
+
+Vertex AI has no static client-side API key, so a baked-in bearer token + project ID is never the right answer. When the host Flutter app uses Firebase, the supported path is `FirebaseVertexAI.instance` from `package:firebase_vertex_ai`; wrap it behind an `LlmClient` adapter that emits the same SSE-style text deltas the rest of the library expects.
 
 ### 9.3 Model selection
 
@@ -675,7 +683,7 @@ The library should be ~80% done before Saturday. Hackathon time is for demo poli
 
 - [x] Models: `QuizStepSpec`, `Contract`, `FieldSpec`, `Constraint` variants, `Posture`, `OutcomeNode` tree types, `Session`
 - [x] Icon registry with the ~160 GymGeist icons
-- [x] `LlmClient` interface + `VertexDirectClient`
+- [x] `LlmClient` interface + `GeminiApiClient` + `VertexProxyClient`
 - [x] `ConstraintEnforcer`, `OutcomeNavigator`, `EngagementReader`
 - [x] `GenerativeStrategy` (non-streaming first, streaming if time)
 - [x] All 7 input renderer widgets (port from GymGeist)

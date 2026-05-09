@@ -92,14 +92,21 @@ class GeminiApiClient extends LlmClient {
   Stream<String> generate({
     required String systemPrompt,
     required List<Message> messages,
-    required Map<String, dynamic> responseSchema,
+    Map<String, dynamic>? responseSchema,
+    Map<String, dynamic>? responseJsonSchema,
     required String model,
     double temperature = 0.7,
   }) {
+    assert(
+      (responseSchema == null) != (responseJsonSchema == null),
+      'GeminiApiClient.generate: pass exactly one of responseSchema / '
+      'responseJsonSchema.',
+    );
     return _generateAsync(
       systemPrompt: systemPrompt,
       messages: messages,
       responseSchema: responseSchema,
+      responseJsonSchema: responseJsonSchema,
       model: model,
       temperature: temperature,
     );
@@ -108,7 +115,8 @@ class GeminiApiClient extends LlmClient {
   Stream<String> _generateAsync({
     required String systemPrompt,
     required List<Message> messages,
-    required Map<String, dynamic> responseSchema,
+    required Map<String, dynamic>? responseSchema,
+    required Map<String, dynamic>? responseJsonSchema,
     required String model,
     required double temperature,
   }) async* {
@@ -131,7 +139,9 @@ class GeminiApiClient extends LlmClient {
       'generationConfig': {
         'temperature': temperature,
         'responseMimeType': 'application/json',
-        'responseSchema': responseSchema,
+        if (responseSchema != null) 'responseSchema': responseSchema,
+        if (responseJsonSchema != null)
+          'responseJsonSchema': responseJsonSchema,
       },
     };
 

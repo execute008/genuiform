@@ -74,14 +74,12 @@ export 'src/icons/icon_registry.dart' show IconRegistry;
 // Message is now provided by Phase 1's models/message.dart — hide the temp stub.
 export 'src/llm/llm_client.dart';
 
-// VertexDirectClient — direct Vertex AI REST transport (dev/server-side only).
-export 'src/llm/vertex_direct_client.dart';
-
 // GeminiApiClient — public Gemini REST transport using a static AI Studio key
-// (dev/server-side only).
+// (the standard transport for demos and the workbench).
 export 'src/llm/gemini_api_client.dart';
 
-// VertexProxyClient — Firebase Function proxy transport (stub; v0.4).
+// VertexProxyClient — server-proxied Vertex AI transport for production
+// Flutter apps that route through a backend (e.g. a Cloud Function).
 export 'src/llm/vertex_proxy_client.dart';
 
 // FakeLlmClient — scripted test double for use in consumer test suites.

@@ -14,8 +14,13 @@ class FakeLlmInvocation {
   /// The [LlmClient.generate] `messages` argument.
   final List<Message> messages;
 
-  /// The [LlmClient.generate] `responseSchema` argument.
-  final Map<String, dynamic> responseSchema;
+  /// The legacy `responseSchema` argument (null when the caller used
+  /// [responseJsonSchema] instead).
+  final Map<String, dynamic>? responseSchema;
+
+  /// The newer `responseJsonSchema` argument (null when the caller used
+  /// [responseSchema] instead). Exactly one of the two is non-null.
+  final Map<String, dynamic>? responseJsonSchema;
 
   /// The [LlmClient.generate] `model` argument.
   final String model;
@@ -27,6 +32,7 @@ class FakeLlmInvocation {
     required this.systemPrompt,
     required this.messages,
     required this.responseSchema,
+    required this.responseJsonSchema,
     required this.model,
     required this.temperature,
   });
@@ -76,10 +82,16 @@ class FakeLlmClient extends LlmClient {
   Stream<String> generate({
     required String systemPrompt,
     required List<Message> messages,
-    required Map<String, dynamic> responseSchema,
+    Map<String, dynamic>? responseSchema,
+    Map<String, dynamic>? responseJsonSchema,
     required String model,
     double temperature = 0.7,
   }) {
+    assert(
+      (responseSchema == null) != (responseJsonSchema == null),
+      'FakeLlmClient.generate: pass exactly one of responseSchema / '
+      'responseJsonSchema.',
+    );
     if (_remaining.isEmpty) {
       throw StateError(
         'FakeLlmClient: scripted responses exhausted '
@@ -94,6 +106,7 @@ class FakeLlmClient extends LlmClient {
         systemPrompt: systemPrompt,
         messages: messages,
         responseSchema: responseSchema,
+        responseJsonSchema: responseJsonSchema,
         model: model,
         temperature: temperature,
       ),

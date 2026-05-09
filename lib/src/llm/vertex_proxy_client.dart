@@ -11,9 +11,11 @@ import 'llm_client.dart';
 /// function (e.g. a Firebase Cloud Function), keeping the GCP service account
 /// credentials off the client device.
 ///
-/// This is the **production-ready transport** for shipped mobile apps. The
-/// [VertexDirectClient] embeds a Vertex API key in the binary and must never
-/// be used outside of demos or server-side environments.
+/// This is the **production-ready transport** for shipped Flutter apps that
+/// need Vertex AI specifically (rather than the public AI Studio Gemini API,
+/// which [GeminiApiClient] handles). Vertex AI has no static client-side API
+/// key, so the only safe paths are this proxy or `FirebaseVertexAI.instance`
+/// from `package:firebase_vertex_ai`.
 ///
 /// The proxy is expected to:
 ///
@@ -22,8 +24,8 @@ import 'llm_client.dart';
 /// 2. Forward the JSON payload as-is to Vertex AI's
 ///    `:streamGenerateContent` endpoint, attaching its own service-account
 ///    credentials.
-/// 3. Return the Vertex response body verbatim (a JSON array of streamed
-///    chunks, exactly as [VertexDirectClient] consumes).
+/// 3. Return the Vertex response body verbatim (a Server-Sent Events stream
+///    of `data: {...}` lines from `:streamGenerateContent`).
 ///
 /// A reference Firebase Function implementing this contract ships in
 /// `examples/firebase-proxy/index.ts` (~30 lines).
@@ -60,14 +62,21 @@ class VertexProxyClient extends LlmClient {
   Stream<String> generate({
     required String systemPrompt,
     required List<Message> messages,
-    required Map<String, dynamic> responseSchema,
+    Map<String, dynamic>? responseSchema,
+    Map<String, dynamic>? responseJsonSchema,
     required String model,
     double temperature = 0.7,
   }) {
+    assert(
+      (responseSchema == null) != (responseJsonSchema == null),
+      'VertexProxyClient.generate: pass exactly one of responseSchema / '
+      'responseJsonSchema.',
+    );
     return _generateAsync(
       systemPrompt: systemPrompt,
       messages: messages,
       responseSchema: responseSchema,
+      responseJsonSchema: responseJsonSchema,
       model: model,
       temperature: temperature,
     );
@@ -76,7 +85,8 @@ class VertexProxyClient extends LlmClient {
   Stream<String> _generateAsync({
     required String systemPrompt,
     required List<Message> messages,
-    required Map<String, dynamic> responseSchema,
+    required Map<String, dynamic>? responseSchema,
+    required Map<String, dynamic>? responseJsonSchema,
     required String model,
     required double temperature,
   }) async* {
@@ -90,7 +100,8 @@ class VertexProxyClient extends LlmClient {
     final payload = {
       'systemPrompt': systemPrompt,
       'messages': messages.map((m) => m.toJson()).toList(),
-      'responseSchema': responseSchema,
+      if (responseSchema != null) 'responseSchema': responseSchema,
+      if (responseJsonSchema != null) 'responseJsonSchema': responseJsonSchema,
       'model': model,
       'temperature': temperature,
     };

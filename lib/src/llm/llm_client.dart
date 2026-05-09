@@ -1,10 +1,10 @@
 import '../models/message.dart';
 
-/// Abstract transport layer for Vertex AI Gemini.
+/// Abstract transport layer for Gemini.
 ///
-/// All concrete implementations — [VertexDirectClient], [GeminiApiClient],
-/// [VertexProxyClient], [FakeLlmClient] — implement this interface so strategy
-/// code can swap transports without modification.
+/// All concrete implementations — [GeminiApiClient], [VertexProxyClient],
+/// [FakeLlmClient] — implement this interface so strategy code can swap
+/// transports without modification.
 ///
 /// [generate] returns a [Stream<String>] of incremental text deltas — typically
 /// one yield per upstream SSE event. Consumers must accumulate the deltas into
@@ -16,11 +16,20 @@ abstract class LlmClient {
   /// resulting buffer themselves.
   ///
   /// Parameters:
-  /// - [systemPrompt] — injected as `systemInstruction` in the Vertex payload.
-  /// - [messages] — conversation history; mapped to Vertex `contents`.
-  /// - [responseSchema] — JSON Schema passed as `generationConfig.responseSchema`.
-  /// - [model] — Vertex model ID string (e.g. `'gemini-2.5-flash'`). No enum.
-  /// - [temperature] — defaults to 0.7; clamped by Vertex to the model's range.
+  /// - [systemPrompt] — injected as `systemInstruction` in the Gemini payload.
+  /// - [messages] — conversation history; mapped to Gemini `contents`.
+  /// - [responseSchema] — legacy OpenAPI 3.0 subset. Sent as
+  ///   `generationConfig.responseSchema`. Honours `enum`, `minimum`,
+  ///   `maximum`, `description`. Does NOT honour `oneOf`,
+  ///   `additionalProperties`, `$ref`, `prefixItems`, etc.
+  /// - [responseJsonSchema] — fuller JSON Schema (Gemini 2.5+). Sent as
+  ///   `generationConfig.responseJsonSchema`. Honours `oneOf`,
+  ///   `additionalProperties`, `$ref`, and the rest of JSON Schema draft 7-ish
+  ///   semantics. Use this for discriminated-union response shapes.
+  /// - [model] — Gemini model ID string (e.g. `'gemini-2.5-flash'`). No enum.
+  /// - [temperature] — defaults to 0.7; clamped by the backend to the model's range.
+  ///
+  /// Exactly one of [responseSchema] or [responseJsonSchema] must be provided.
   ///
   /// Errors are forwarded on the stream's error channel as [LlmClientError]
   /// subtypes. Do not add a `default` branch when switching on [LlmClientError]
@@ -29,7 +38,8 @@ abstract class LlmClient {
   Stream<String> generate({
     required String systemPrompt,
     required List<Message> messages,
-    required Map<String, dynamic> responseSchema,
+    Map<String, dynamic>? responseSchema,
+    Map<String, dynamic>? responseJsonSchema,
     required String model,
     double temperature = 0.7,
   });

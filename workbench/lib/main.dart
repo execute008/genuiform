@@ -31,14 +31,11 @@ class _WorkbenchRoot extends StatefulWidget {
 }
 
 class _WorkbenchRootState extends State<_WorkbenchRoot> {
-  // Public Gemini API path (free-tier AI Studio key). Wins over Vertex when set.
+  // Public Gemini API path (free-tier AI Studio key from
+  // aistudio.google.com/apikey). The workbench only supports this transport
+  // — Vertex AI from a Flutter client must go through Firebase, not via a
+  // baked-in API key.
   static const _envGeminiKey = String.fromEnvironment('GEMINI_API_KEY');
-
-  // Vertex AI path (OAuth bearer + project + location).
-  static const _envApiKey = String.fromEnvironment('VERTEX_API_KEY');
-  static const _envProjectId = String.fromEnvironment('VERTEX_PROJECT_ID');
-  static const _envLocation =
-      String.fromEnvironment('VERTEX_LOCATION', defaultValue: 'europe-west1');
 
   /// When true, bypass all credential checks and use the local mock client.
   /// Enable with `--dart-define=USE_MOCK=true`.
@@ -51,8 +48,6 @@ class _WorkbenchRootState extends State<_WorkbenchRoot> {
   static const _initialTemperature = 0.7;
 
   late final ValueNotifier<String> _geminiKey;
-  late final ValueNotifier<String> _apiKey;
-  late final ValueNotifier<String> _projectId;
   late final ValueNotifier<String> _model;
   late final ValueNotifier<double> _temperature;
 
@@ -60,8 +55,6 @@ class _WorkbenchRootState extends State<_WorkbenchRoot> {
   void initState() {
     super.initState();
     _geminiKey = ValueNotifier(_envGeminiKey);
-    _apiKey = ValueNotifier(_envApiKey);
-    _projectId = ValueNotifier(_envProjectId);
     _model = ValueNotifier(_initialModel);
     _temperature = ValueNotifier(_initialTemperature);
   }
@@ -69,24 +62,16 @@ class _WorkbenchRootState extends State<_WorkbenchRoot> {
   @override
   void dispose() {
     _geminiKey.dispose();
-    _apiKey.dispose();
-    _projectId.dispose();
     _model.dispose();
     _temperature.dispose();
     super.dispose();
   }
 
   bool get _hasGemini => _geminiKey.value.isNotEmpty;
-  bool get _hasVertex => _apiKey.value.isNotEmpty && _projectId.value.isNotEmpty;
 
   LlmClient _buildClient() {
     if (_useMock) return WorkbenchMockLlmClient();
-    if (_hasGemini) return GeminiApiClient(apiKey: _geminiKey.value);
-    return VertexDirectClient(
-      apiKey: _apiKey.value,
-      projectId: _projectId.value,
-      location: _envLocation,
-    );
+    return GeminiApiClient(apiKey: _geminiKey.value);
   }
 
   @override
@@ -100,7 +85,7 @@ class _WorkbenchRootState extends State<_WorkbenchRoot> {
       );
     }
 
-    if (_hasGemini || _hasVertex) {
+    if (_hasGemini) {
       return AppShell(
         client: _buildClient(),
         model: _model,
@@ -111,14 +96,14 @@ class _WorkbenchRootState extends State<_WorkbenchRoot> {
     return Scaffold(
       appBar: AppBar(title: const Text('genuiform workbench')),
       body: ListenableBuilder(
-        listenable: Listenable.merge([_geminiKey, _apiKey, _projectId]),
+        listenable: _geminiKey,
         builder: (context, _) {
-          if (_hasGemini || _hasVertex) {
+          if (_hasGemini) {
             return AppShell(
-              client: _buildClient(),
-              model: _model,
-              temperature: _temperature,
-            );
+        client: _buildClient(),
+        model: _model,
+        temperature: _temperature,
+      );
           }
 
           return Center(
@@ -137,7 +122,7 @@ class _WorkbenchRootState extends State<_WorkbenchRoot> {
                     ),
                     const SizedBox(height: 16),
                     Text(
-                      'Option A — Google AI Studio (recommended for demos)',
+                      'Google AI Studio (Gemini API key)',
                       style: Theme.of(context).textTheme.labelLarge,
                     ),
                     const SizedBox(height: 8),
@@ -152,27 +137,10 @@ class _WorkbenchRootState extends State<_WorkbenchRoot> {
                             fontStyle: FontStyle.italic,
                           ),
                     ),
-                    const SizedBox(height: 24),
-                    const Divider(),
                     const SizedBox(height: 16),
                     Text(
-                      'Option B — Vertex AI',
-                      style: Theme.of(context).textTheme.labelLarge,
-                    ),
-                    const SizedBox(height: 8),
-                    ApiKeyPanel(
-                      notifier: _apiKey,
-                      label: 'Vertex OAuth token',
-                    ),
-                    const SizedBox(height: 12),
-                    ApiKeyPanel(
-                      notifier: _projectId,
-                      label: 'GCP Project ID',
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Or build with --dart-define=GEMINI_API_KEY=xxx '
-                      '(or VERTEX_API_KEY + VERTEX_PROJECT_ID) to skip this screen.',
+                      'Or build with --dart-define=GEMINI_API_KEY=xxx to skip '
+                      'this screen.',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                             fontStyle: FontStyle.italic,
                           ),

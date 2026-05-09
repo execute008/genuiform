@@ -24,9 +24,13 @@ right pane wraps into a live `GenuiForm`. See `WORKBENCH_SPEC.md` §1 for why.
 
 ## Run it
 
-The workbench supports two live transports plus a stage-safe mock.
+The workbench uses Google AI Studio (Gemini API key) plus a stage-safe mock.
+Vertex AI from a Flutter client must go through Firebase
+(`FirebaseVertexAI.instance`), not via a baked-in bearer token, so the
+workbench deliberately does not expose a Vertex transport — for a Vertex demo
+use the example app with a Firebase-configured project.
 
-**Option A — Google AI Studio (recommended for demos).** Grab a free key from
+**Live transport — Google AI Studio.** Grab a free key from
 [aistudio.google.com/apikey](https://aistudio.google.com/apikey) — no GCP
 project, no OAuth dance:
 
@@ -34,21 +38,9 @@ project, no OAuth dance:
 flutter run -d chrome --dart-define=GEMINI_API_KEY=AIza...
 ```
 
-**Option B — Vertex AI.** Three `--dart-define` keys feed the Vertex transport.
-`VERTEX_API_KEY` is a short-lived OAuth bearer (e.g. `gcloud auth
-print-access-token`), **not** an `AIza...` key:
+If the key is not set at compile time, the workbench shows a paste panel.
 
-```bash
-flutter run -d chrome \
-  --dart-define=VERTEX_API_KEY=<oauth-token> \
-  --dart-define=VERTEX_PROJECT_ID=<your-gcp-project> \
-  --dart-define=VERTEX_LOCATION=europe-west1
-```
-
-If both transports are configured at compile time, Gemini wins. If neither is
-set, the workbench shows a paste panel with both options.
-
-To enable the full A2UI round-trip (Vertex emits A2UI v0.9 JSON per outcome,
+To enable the full A2UI round-trip (Gemini emits A2UI v0.9 JSON per outcome,
 rendered live via `flutter/genui`, with an in-Surface Restart action), add:
 
 ```
@@ -57,7 +49,7 @@ rendered live via `flutter/genui`, with an in-Surface Restart action), add:
 
 The default (unflagged) path is unchanged: form completion shows a handoff toast.
 
-For a stage-safe demo path that never calls Vertex:
+For a stage-safe demo path that never calls the LLM:
 
 ```bash
 flutter run -d chrome --dart-define=USE_MOCK=true
@@ -88,19 +80,8 @@ you're in.
 
 ## Build for production
 
-Gemini API key (single flag):
-
 ```bash
 flutter build web --release --dart-define=GEMINI_API_KEY=AIza...
-```
-
-Vertex AI:
-
-```bash
-flutter build web --release \
-  --dart-define=VERTEX_API_KEY=<oauth-token> \
-  --dart-define=VERTEX_PROJECT_ID=<project> \
-  --dart-define=VERTEX_LOCATION=europe-west1
 ```
 
 The output lands in `build/web/`. The hosting target should serve over HTTPS

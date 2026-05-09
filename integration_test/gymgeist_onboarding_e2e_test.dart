@@ -6,12 +6,10 @@
 //
 // Run with:
 //   GENUIFORM_RUN_INTEGRATION=1 \
-//   GEMINI_API_KEY=<access-token> \
-//   GEMINI_PROJECT_ID=<gcp-project> \
+//   GEMINI_API_KEY=<aistudio-api-key> \
 //   flutter test integration_test/gymgeist_onboarding_e2e_test.dart \
 //     --dart-define=GENUIFORM_RUN_INTEGRATION=1 \
-//     --dart-define=GEMINI_API_KEY=<key> \
-//     --dart-define=GEMINI_PROJECT_ID=<project>
+//     --dart-define=GEMINI_API_KEY=<key>
 //
 // All tests in this file are skipped unless the gate is set.
 import 'dart:async';
@@ -29,13 +27,6 @@ String _apiKey() {
   const fromDefine = String.fromEnvironment('GEMINI_API_KEY');
   if (fromDefine.isNotEmpty) return fromDefine;
   return Platform.environment['GEMINI_API_KEY'] ?? '';
-}
-
-/// Reads the project ID from --dart-define first, then from the environment.
-String _projectId() {
-  const fromDefine = String.fromEnvironment('GEMINI_PROJECT_ID');
-  if (fromDefine.isNotEmpty) return fromDefine;
-  return Platform.environment['GEMINI_PROJECT_ID'] ?? '';
 }
 
 // ---------------------------------------------------------------------------
@@ -184,32 +175,21 @@ Future<StepEvent?> _driveForm(
 // ---------------------------------------------------------------------------
 
 void main() {
-  group('GymGeist onboarding — end-to-end (real Vertex AI)', () {
-    late VertexDirectClient client;
+  group('GymGeist onboarding — end-to-end (real Gemini API)', () {
+    late GeminiApiClient client;
 
     setUp(() {
       if (!_runIntegration) return;
 
       final apiKey = _apiKey();
-      final projectId = _projectId();
 
       expect(
         apiKey,
         isNotEmpty,
         reason: 'Set GEMINI_API_KEY env var or --dart-define=GEMINI_API_KEY.',
       );
-      expect(
-        projectId,
-        isNotEmpty,
-        reason:
-            'Set GEMINI_PROJECT_ID env var or --dart-define=GEMINI_PROJECT_ID.',
-      );
 
-      client = VertexDirectClient(
-        apiKey: apiKey,
-        projectId: projectId,
-        location: 'europe-west1',
-      );
+      client = GeminiApiClient(apiKey: apiKey);
     });
 
     test(

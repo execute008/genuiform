@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 
-/// A small panel that lets the user paste a sensitive string (e.g. a Vertex
-/// API key or GCP project ID) at runtime without hard-coding it.
+/// A small panel that lets the user paste a sensitive string (e.g. a Gemini
+/// API key) at runtime without hard-coding it.
 ///
 /// Priority order for the stored value:
-/// 1. `--dart-define=VERTEX_API_KEY=xxx` (compile-time; caller passes it in
+/// 1. `--dart-define=GEMINI_API_KEY=xxx` (compile-time; caller passes it in
 ///    via [ValueNotifier] already initialised to `String.fromEnvironment(...)`).
 /// 2. The value the user types and taps "Save".
 /// 3. Empty string — the panel shows a "paste your key" prompt.
@@ -27,7 +27,7 @@ class ApiKeyPanel extends StatefulWidget {
   /// listen and rebuild.
   final ValueNotifier<String> notifier;
 
-  /// Short label shown above the text field (e.g. "Vertex API key").
+  /// Short label shown above the text field (e.g. "Gemini API key").
   final String label;
 
   @override

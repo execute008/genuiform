@@ -9,7 +9,8 @@ class _TestLlmClient extends LlmClient {
   Stream<String> generate({
     required String systemPrompt,
     required List<Message> messages,
-    required Map<String, dynamic> responseSchema,
+    Map<String, dynamic>? responseSchema,
+    Map<String, dynamic>? responseJsonSchema,
     required String model,
     double temperature = 0.7,
   }) {

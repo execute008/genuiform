@@ -6,31 +6,22 @@ A runnable Flutter app demonstrating the two canonical scenarios from the genuif
 
 ## What this is
 
-**genuiform** is a Flutter library for building forms that adapt to the user as they fill them out, powered by Vertex AI Gemini. Forms are typed functions with a posture and a tree of outcomes — generative inside, predictable outside. This example app wires two real scenario configs (freelance lead qualification and GymGeist onboarding) against a live Vertex AI endpoint so you can walk through both flows interactively.
+**genuiform** is a Flutter library for building forms that adapt to the user as they fill them out, powered by Gemini. Forms are typed functions with a posture and a tree of outcomes — generative inside, predictable outside. This example app wires two real scenario configs (freelance lead qualification and GymGeist onboarding) against a live Gemini endpoint so you can walk through both flows interactively.
 
 ---
 
 ## Run instructions
 
-You need a short-lived Vertex AI OAuth access token and your GCP project ID. The cleanest way to inject them is via `--dart-define` so they never touch source control:
+You need a Gemini API key from [Google AI Studio](https://aistudio.google.com/apikey) (free tier works). The cleanest way to inject it is via `--dart-define` so it never touches source control:
 
 ```bash
 flutter run -d macos \
-  --dart-define=GEMINI_API_KEY=$YOUR_VERTEX_TOKEN \
-  --dart-define=GEMINI_PROJECT_ID=$YOUR_GCP_PROJECT
+  --dart-define=GEMINI_API_KEY=$YOUR_GEMINI_KEY
 ```
 
-Replace `-d macos` with `-d linux`, `-d ios`, or `-d <device-id>` as appropriate. Web is intentionally excluded — `VertexDirectClient` bundles the token client-side and a browser would expose it to anyone with devtools open.
+Replace `-d macos` with `-d linux`, `-d ios`, or `-d <device-id>` as appropriate. Web is intentionally excluded — `GeminiApiClient` bundles the key client-side and a browser would expose it to anyone with devtools open.
 
-If you omit the `--dart-define` flags, the app shows an "API key" panel on startup. Paste the values there; they live only in the running process.
-
-### Getting a Vertex AI access token
-
-```bash
-gcloud auth print-access-token
-```
-
-The token is valid for one hour. Re-run the command to refresh it. For longer-lived deployments, see §9 / §13.3 of the spec for `VertexProxyClient` (a Firebase Function that holds the service-account credential server-side).
+If you omit the `--dart-define` flag, the app shows an "API key" panel on startup. Paste the value there; it lives only in the running process.
 
 ---
 
@@ -48,15 +39,18 @@ The token is valid for one hour. Re-run the command to refresh it. For longer-li
 - Type as a confused early founder: form asks 7 questions, picks `send_proposal`, captures email.
 - Type as someone with €500/month budget and €30k/month scope: form asks 3 questions, picks `decline`, politely closes.
 
-**The pitch (20s):** "Four primitives. Contract for what to collect. Constraints for what must never happen. Posture for how it should feel. Outcomes for where it can land. Generative inside, predictable outside. Built for Flutter, powered by Vertex AI. Already shipping in two real apps next week."
+**The pitch (20s):** "Four primitives. Contract for what to collect. Constraints for what must never happen. Posture for how it should feel. Outcomes for where it can land. Generative inside, predictable outside. Built for Flutter, powered by Gemini. Already shipping in two real apps next week."
 
 ---
 
 ## Production warning
 
-`VertexDirectClient` bundles the API key (OAuth token) directly in the client. This is fine for demos, hackathon runs, and server-side usage. Do **not** ship it in a mobile app — the token is visible in memory and in network traffic.
+`GeminiApiClient` bundles the API key directly in the client. This is fine for demos, hackathon runs, and server-side usage. For shipped Flutter apps you should either:
 
-For production, use `VertexProxyClient` (spec §9 / §13.3), which calls a Firebase Function that holds the service-account credential on the server. The client sends only a user identity token; the server mints the Vertex credential and proxies the request.
+- proxy through your own backend (`VertexProxyClient` — spec §9 / §13.3, a Firebase Function holds the service-account credential on the server and the client sends only a user identity token), or
+- use Firebase Vertex AI (`FirebaseVertexAI.instance` from `package:firebase_vertex_ai`) when the Flutter project is already on Firebase.
+
+Vertex AI from a Flutter client must never be wired with a baked-in bearer token + project ID — it has no static client-side API-key model.
 
 ---
 
@@ -67,4 +61,4 @@ For production, use `VertexProxyClient` (spec §9 / §13.3), which calls a Fireb
 | `lib/scenarios/freelance_qualification.dart` | §11.1 | `salesDiscovery` | Branch → book_call / send_proposal / decline |
 | `lib/scenarios/gymgeist_onboarding.dart` | §11.2 | `supportiveOnboarding` | Layer → Layer → Branch (3 options) |
 
-Manual smoke testing (walking through both flows with a real Vertex token) is the user's responsibility. The automated test suite covers only the `ApiKeyPanel` widget.
+Manual smoke testing (walking through both flows with a real Gemini key) is the user's responsibility. The automated test suite covers only the `ApiKeyPanel` widget.

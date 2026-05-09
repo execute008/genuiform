@@ -133,7 +133,7 @@ void main() {
 
       await strategy.nextStep(session, config).toList();
 
-      final schema = client.invocations.first.responseSchema;
+      final schema = client.invocations.first.responseSchema!;
       final props = schema['properties'] as Map<String, dynamic>;
       expect(props.containsKey('next_step_id'), isTrue);
       expect(props.containsKey('engagement'), isTrue);
@@ -151,7 +151,7 @@ void main() {
 
       await strategy.nextStep(session, config).toList();
 
-      final schema = client.invocations.first.responseSchema;
+      final schema = client.invocations.first.responseSchema!;
       final props = schema['properties'] as Map<String, dynamic>;
       final nextStepProp = props['next_step_id'] as Map<String, dynamic>;
       final enumValues = nextStepProp['enum'] as List<dynamic>;
