@@ -1364,3 +1364,38 @@ footer {
   .install-box { font-size: 13px; }
   .install-box .prompt { padding-left: 14px; }
 }
+
+/* Simplified Primitives Section */
+.primitives-simple {
+  padding: 80px 0;
+}
+
+.primitives-simple .pills-row {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.primitives-simple .pill {
+  background: var(--surface-container);
+  border: 1px solid var(--outline-variant);
+  padding: 12px 24px;
+  border-radius: 100px;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--primary);
+  letter-spacing: 0.02em;
+}
+
+@media (max-width: 640px) {
+  .primitives-simple .pills-row {
+    gap: 12px;
+  }
+  
+  .primitives-simple .pill {
+    padding: 10px 20px;
+    font-size: 13px;
+  }
+}
