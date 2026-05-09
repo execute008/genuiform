@@ -3,10 +3,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:genuiform/genuiform.dart';
+
 import 'package:genuiform_a2ui/genuiform_a2ui.dart';
 
 import '../editor/code_editor.dart';
 import '../editor/legend_drawer.dart';
+import '../editor/progress_drawer.dart';
 import '../parser/parse_dsl.dart';
 import '../persistence/url_state.dart';
 import '../preview/form_preview.dart';
@@ -35,8 +37,23 @@ class AppShell extends StatefulWidget {
   /// The LLM client wired up from the entry point.
   final LlmClient client;
 
-  /// The Vertex AI model string (e.g. `'gemini-2.5-flash'`).
-  final String model;
+  /// The currently-selected Gemini model. A [ValueNotifier] (not a plain
+  /// String) so the toolbar dropdown can swap models at runtime: when the
+  /// value changes, [_AppShellState] rebuilds the A2UI emitter and bumps the
+  /// form key so both the A2UI and form-generation paths pick up the new
+  /// model on the next emit / step.
+  final ValueNotifier<String> model;
+
+  /// Models offered by the toolbar dropdown. Includes the currently-broken
+  /// `gemini-3-flash-preview` deliberately so degenerate-loop bugs can be
+  /// reproduced and bisected.
+  static const candidateModels = <String>[
+    'gemini-flash-latest',
+    'gemini-2.5-flash',
+    'gemini-2.5-pro',
+    'gemini-3-flash-preview',
+    'gemini-3-pro-preview',
+  ];
 
   /// When true, a persistent MOCK badge is shown in the top bar.
   /// Set when `--dart-define=USE_MOCK=true`.
@@ -54,30 +71,65 @@ class _AppShellState extends State<AppShell> {
   /// The current DSL source being displayed and edited in the left pane.
   late String _dsl;
 
-  /// Latest parse result. Guaranteed non-null after initState.
+  /// Latest parse result. Guaranteed non-null after initState. Drives the
+  /// editor's error marks and parse-status footer so feedback stays snappy.
   late ParseResult _parseResult;
+
+  /// The most recent **clean** parse result that has been "committed" — i.e.
+  /// forwarded down to [FormPreview]. The form preview reads from this rather
+  /// than [_parseResult] so a longer debounce can throttle how often the LLM
+  /// is asked to regenerate the current step. Falls back to the last known-
+  /// good config while the user is mid-edit (transient parse errors don't
+  /// blank out the form).
+  late ParseResult _committedParseResult;
 
   /// Bumping this key forces [FormPreview] to rebuild and restart the form.
   int _formKey = 0;
 
-  /// Debounce timer for re-parsing after keystrokes.
+  /// Debounce timer for re-parsing after keystrokes — short, drives the
+  /// editor's inline error feedback.
   Timer? _debounce;
+
+  /// Debounce timer for **committing** a clean parse to [_committedParseResult],
+  /// which is what actually triggers [FormController.rebuildConfig] (and thus
+  /// an LLM call) downstream. Kept significantly longer than [_debounce] so
+  /// active typing doesn't hammer the model.
+  Timer? _commitDebounce;
+
+  /// How long to wait after the last keystroke before forwarding new parsed
+  /// primitives down to the running form. Empirically: shorter than this and
+  /// every typing pause re-fires generation; longer and the live-edit feel
+  /// disappears.
+  static const Duration _kCommitDebounce = Duration(milliseconds: 2000);
 
   /// Last DSL value that was synced to the URL hash (avoids redundant writes).
   String _lastSyncedDsl = '';
 
-  /// Used to open the [LegendDrawer] from the AppBar action button — the
-  /// AppBar's BuildContext doesn't see the [Scaffold] above it, so we route
-  /// through a key instead of [Scaffold.of].
+  /// Used to open the progress end-drawer from the AppBar — the AppBar's
+  /// BuildContext doesn't see the [Scaffold] above it, so we route through a
+  /// key instead of [Scaffold.of].
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
-  /// Emitter constructed once per session, shared across form completions.
+  /// Whether the DSL reference sidebar is currently visible inside the editor
+  /// pane. Lives here (not in [_LeftPane]) so the toggle button in the editor
+  /// header can open and close the same panel.
+  bool _legendOpen = false;
+
+  /// Live reference to the inner [FormController] hoisted out of [GenuiForm]
+  /// via [GenuiForm.onControllerCreated]. Driven by [FormPreview], read by
+  /// [ProgressDrawer]. A [ValueNotifier] (instead of plain state) means the
+  /// drawer rebuilds when the controller is recreated on a Run/Reset.
+  final ValueNotifier<FormController?> _controllerRef =
+      ValueNotifier<FormController?>(null);
+
+  /// Emitter constructed lazily and rebuilt whenever the user picks a new
+  /// model from the toolbar dropdown.
   ///
   /// Always constructed (even when the client is a mock), because the gating
   /// decision — whether to actually call through to the emitter — lives in
   /// [FormPreview], which has visibility into both the client type and the
   /// compile-time [_kUseA2uiHandoff] flag.
-  late final A2uiOutcomeEmitter _a2uiEmitter;
+  late A2uiOutcomeEmitter _a2uiEmitter;
 
   @override
   void initState() {
@@ -97,24 +149,47 @@ class _AppShellState extends State<AppShell> {
 
     // Parse eagerly so _parseResult is always non-null before the first build.
     _parseResult = parseDsl(_dsl);
+    // Initial paint forwards the same result downstream — no debounce on first
+    // mount.
+    _committedParseResult = _parseResult;
 
     // Sync the clean initial state to the URL.
     if (_parseResult.isClean) {
       _syncUrl();
     }
 
-    // Construct the A2UI emitter once per session.
+    // Construct the A2UI emitter for the initial model.
     // AppShell constructs always; FormPreview gates on client type + flag.
     _a2uiEmitter = A2uiOutcomeEmitter(
       client: widget.client,
-      model: widget.model,
+      model: widget.model.value,
     );
+
+    // Rebuild the emitter and restart the form whenever the user picks a new
+    // model from the toolbar dropdown.
+    widget.model.addListener(_onModelChanged);
   }
 
   @override
   void dispose() {
+    widget.model.removeListener(_onModelChanged);
     _debounce?.cancel();
+    _commitDebounce?.cancel();
+    _controllerRef.dispose();
     super.dispose();
+  }
+
+  void _onModelChanged() {
+    setState(() {
+      _a2uiEmitter = A2uiOutcomeEmitter(
+        client: widget.client,
+        model: widget.model.value,
+      );
+      // Bump the form key so any in-flight LLM call dies and the next step
+      // is regenerated with the new model. Switching models mid-form is a
+      // debug action; losing partial answers is acceptable.
+      _formKey++;
+    });
   }
 
   /// Writes the current DSL to the URL hash when it is clean and has changed.
@@ -132,23 +207,46 @@ class _AppShellState extends State<AppShell> {
       final result = parseDsl(_dsl);
       setState(() {
         _parseResult = result;
-        // Only bump the form key on a clean parse so a transient error does
-        // not kill an in-progress LLM stream.
-        if (result.isClean) {
-          _formKey++;
-        }
+        // Deliberately do NOT bump _formKey on a clean parse: that used to
+        // tear down the form and discard every answer the user had filled in.
+        // We now flow the new primitives down to FormPreview/GenuiForm which
+        // calls FormController.rebuildConfig, preserving session history and
+        // re-asking the LLM for the current step against the new DSL. The
+        // form key still bumps on explicit Run / Reset / scenario picks.
       });
       _syncUrl();
+
+      // Schedule a separate, longer debounce before forwarding the parsed
+      // primitives to the running form. This prevents every typing pause
+      // from firing an LLM regeneration. Reset on every keystroke so the
+      // commit only happens once typing has actually stopped.
+      _commitDebounce?.cancel();
+      if (result.isClean) {
+        _commitDebounce = Timer(_kCommitDebounce, () {
+          if (!mounted) return;
+          // Re-check: if the user has continued editing into an error state
+          // since the timer was scheduled, leave the previous good config
+          // mounted instead of committing nothing.
+          if (!_parseResult.isClean) return;
+          if (identical(_parseResult, _committedParseResult)) return;
+          setState(() {
+            _committedParseResult = _parseResult;
+          });
+        });
+      }
     });
   }
 
   /// Called when the user picks a new scenario from the dropdown.
   void _onScenarioPicked(Scenario scenario) {
     _debounce?.cancel();
+    _commitDebounce?.cancel();
     setState(() {
       _currentScenarioId = scenario.id;
       _dsl = scenario.dsl;
       _parseResult = parseDsl(_dsl);
+      // Scenario switches are deliberate — commit immediately, no debounce.
+      _committedParseResult = _parseResult;
       // Always bump the form key on a deliberate scenario switch — cursor
       // reset and form restart are desired behaviour here.
       _formKey++;
@@ -156,12 +254,23 @@ class _AppShellState extends State<AppShell> {
     _syncUrl();
   }
 
+  void _openProgressDrawer() {
+    _scaffoldKey.currentState?.openEndDrawer();
+  }
+
+  void _toggleLegend() {
+    setState(() => _legendOpen = !_legendOpen);
+  }
+
   /// Re-parses the current DSL synchronously and bumps the form key
   /// unconditionally, aborting any in-flight stream.
   void _runOrReset() {
     _debounce?.cancel();
+    _commitDebounce?.cancel();
     setState(() {
       _parseResult = parseDsl(_dsl);
+      // Run/Reset is an explicit "go now" — bypass the commit debounce.
+      _committedParseResult = _parseResult;
       _formKey++;
     });
     _syncUrl();
@@ -169,8 +278,10 @@ class _AppShellState extends State<AppShell> {
 
   @override
   Widget build(BuildContext context) {
-    // Only pass the form when parsing produced a complete result.
-    final hasForm = _parseResult.hasForm;
+    // The form pane reads the *committed* parse result so transient errors
+    // and rapid keystrokes don't tear down the form / refire the LLM. The
+    // editor itself still reflects [_parseResult] for fast error feedback.
+    final hasForm = _committedParseResult.hasForm;
 
     final currentScenario =
         kScenarios.firstWhere((s) => s.id == _currentScenarioId);
@@ -180,8 +291,10 @@ class _AppShellState extends State<AppShell> {
     // dropdown when the DSL no longer matches any preset exactly.
     final isModified = !kScenarios.any((s) => s.dsl == _dsl);
 
-    // Build a side-table of outcomeId → SimulatedHandoff from the parsed DSL.
-    final handoffMap = _parseResult.handoffMap ?? const {};
+    // Build a side-table of outcomeId → SimulatedHandoff from the *committed*
+    // DSL so the handoff map matches the contract currently mounted on the
+    // running form.
+    final handoffMap = _committedParseResult.handoffMap ?? const {};
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -192,20 +305,23 @@ class _AppShellState extends State<AppShell> {
           dsl: _dsl,
           parseResult: _parseResult,
           onChanged: _onDslChanged,
+          legendOpen: _legendOpen,
+          onToggleLegend: _toggleLegend,
         );
 
         final Widget rightPane = hasForm
             ? FormPreview(
                 key: ValueKey(_formKey),
-                contract: _parseResult.contract!,
-                constraints: _parseResult.constraints!,
-                posture: _parseResult.posture!,
-                outcomes: _parseResult.outcomes!,
+                contract: _committedParseResult.contract!,
+                constraints: _committedParseResult.constraints!,
+                posture: _committedParseResult.posture!,
+                outcomes: _committedParseResult.outcomes!,
                 client: widget.client,
-                model: widget.model,
+                model: widget.model.value,
                 handoffMap: handoffMap,
                 onRestartRequested: _runOrReset,
                 emitter: _a2uiEmitter,
+                onControllerCreated: (c) => _controllerRef.value = c,
               )
             : const _NoParsedFormPlaceholder();
 
@@ -215,7 +331,7 @@ class _AppShellState extends State<AppShell> {
 
         return Scaffold(
           key: _scaffoldKey,
-          endDrawer: const LegendDrawer(),
+          endDrawer: ProgressDrawer(controllerRef: _controllerRef),
           appBar: AppBar(
             title: const Text('genuiform workbench'),
             actions: [
@@ -265,6 +381,30 @@ class _AppShellState extends State<AppShell> {
               ),
               const SizedBox(width: 12),
 
+              // ── Model picker ──────────────────────────────────────────────
+              ValueListenableBuilder<String>(
+                valueListenable: widget.model,
+                builder: (context, current, _) {
+                  return DropdownButton<String>(
+                    value: current,
+                    underline: const SizedBox.shrink(),
+                    items: AppShell.candidateModels
+                        .map(
+                          (m) => DropdownMenuItem<String>(
+                            value: m,
+                            child: Text(m),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (next) {
+                      if (next == null || next == current) return;
+                      widget.model.value = next;
+                    },
+                  );
+                },
+              ),
+              const SizedBox(width: 12),
+
               // ── Run button ────────────────────────────────────────────────
               Tooltip(
                 message: '⌘ Enter / Ctrl Enter',
@@ -282,11 +422,11 @@ class _AppShellState extends State<AppShell> {
                 icon: const Icon(Icons.refresh),
               ),
 
-              // ── DSL reference drawer ──────────────────────────────────────
+              // ── Progress drawer ───────────────────────────────────────────
               IconButton(
-                tooltip: 'DSL reference',
-                onPressed: () => _scaffoldKey.currentState?.openEndDrawer(),
-                icon: const Icon(Icons.menu_book_outlined),
+                tooltip: 'Contract progress',
+                onPressed: _openProgressDrawer,
+                icon: const Icon(Icons.timeline_outlined),
               ),
 
               // ── About button ──────────────────────────────────────────────
@@ -338,11 +478,15 @@ class _LeftPane extends StatelessWidget {
     required this.dsl,
     required this.parseResult,
     required this.onChanged,
+    required this.legendOpen,
+    required this.onToggleLegend,
   });
 
   final String dsl;
   final ParseResult parseResult;
   final ValueChanged<String> onChanged;
+  final bool legendOpen;
+  final VoidCallback onToggleLegend;
 
   /// Build the list of [EditorErrorMark]s from [parseResult.errors].
   List<EditorErrorMark> get _errorMarks => parseResult.errors
@@ -358,32 +502,57 @@ class _LeftPane extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final editorColumn = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // DSL editor badge
+        Container(
+          padding: const EdgeInsets.fromLTRB(12, 0, 4, 0),
+          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'DSL editor',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                ),
+              ),
+              IconButton(
+                tooltip: legendOpen ? 'Hide DSL reference' : 'DSL reference',
+                onPressed: onToggleLegend,
+                isSelected: legendOpen,
+                icon: const Icon(Icons.menu_book_outlined, size: 18),
+                selectedIcon:
+                    const Icon(Icons.menu_book, size: 18),
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.all(6),
+                constraints: const BoxConstraints(),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: CodeEditor(
+            code: dsl,
+            readOnly: false,
+            onChanged: onChanged,
+            errors: _errorMarks,
+          ),
+        ),
+        // Parse status footer (§4.3)
+        _ParseStatusFooter(parseResult: parseResult),
+      ],
+    );
+
     return Container(
       color: Theme.of(context).colorScheme.surface,
-      child: Column(
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // DSL editor badge
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            color: Theme.of(context).colorScheme.surfaceContainerHighest,
-            child: Text(
-              'DSL editor',
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-            ),
-          ),
-          Expanded(
-            child: CodeEditor(
-              code: dsl,
-              readOnly: false,
-              onChanged: onChanged,
-              errors: _errorMarks,
-            ),
-          ),
-          // Parse status footer (§4.3)
-          _ParseStatusFooter(parseResult: parseResult),
+          Expanded(child: editorColumn),
+          if (legendOpen) LegendDrawer(onClose: onToggleLegend),
         ],
       ),
     );
@@ -521,9 +690,9 @@ class _AboutDialog extends StatelessWidget {
                 'The DSL is a strict subset of Dart. No conditionals, no helpers, '
                 'no imports — just literal config trees. Posture presets '
                 '(salesDiscovery, supportiveOnboarding, clinicalIntake), '
-                'constraints, and outcome trees are all supported. Custom '
-                'callback functions are replaced by named registry entries '
-                '(e.g. Handoff(onReached: bookCalendly)).',
+                'constraints, and outcome trees are all supported. Real '
+                'Dart callbacks are replaced by inline simulated handoffs '
+                "(e.g. Handoff(label: 'Book a call', icon: 'calendar_today')).",
               ),
               SizedBox(height: 16),
               Text(

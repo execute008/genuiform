@@ -121,19 +121,56 @@ class _GenuiFormState extends State<GenuiForm> {
 
   void _initController() {
     _controller = FormController(
-      config: FormConfig(
+      config: _buildConfig(),
+      strategy: widget.strategy ?? GenerativeStrategy(),
+    );
+    _controller.events.listen(_handleEvent);
+    widget.onControllerCreated?.call(_controller);
+    _controller.start();
+  }
+
+  FormConfig _buildConfig() => FormConfig(
         contract: widget.contract,
         constraints: widget.constraints,
         posture: widget.posture,
         outcomes: widget.outcomes,
         client: widget.client,
         model: widget.model,
-      ),
-      strategy: widget.strategy ?? GenerativeStrategy(),
-    );
-    _controller.events.listen(_handleEvent);
-    widget.onControllerCreated?.call(_controller);
-    _controller.start();
+      );
+
+  @override
+  void didUpdateWidget(covariant GenuiForm old) {
+    super.didUpdateWidget(old);
+
+    // Detect a meaningful change in the four parsed primitives. If only the
+    // client identity changed (e.g. mock-vs-real swap) we treat that as a
+    // config-replacing event too, since the underlying transport has shifted.
+    final configChanged = old.contract != widget.contract ||
+        !_listsEqual(old.constraints, widget.constraints) ||
+        old.posture != widget.posture ||
+        old.outcomes != widget.outcomes ||
+        !identical(old.client, widget.client) ||
+        old.model != widget.model;
+
+    if (configChanged) {
+      // Hand the new config to the existing controller — it preserves the
+      // session and re-asks the LLM for the current step against the updated
+      // DSL. If the current node disappeared from the new outcome tree,
+      // [FormController.rebuildConfig] resets cleanly.
+      _controller.rebuildConfig(_buildConfig());
+      // Reset the pending input value — the regenerated step may use a
+      // different input type, and a stale value would be misleading.
+      _currentValue = null;
+    }
+  }
+
+  bool _listsEqual<T>(List<T> a, List<T> b) {
+    if (identical(a, b)) return true;
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
   }
 
   void _handleEvent(StepEvent event) {

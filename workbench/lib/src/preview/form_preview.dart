@@ -34,6 +34,7 @@ class FormPreview extends StatefulWidget {
     this.handoffMap = const {},
     this.onRestartRequested,
     this.emitter,
+    this.onControllerCreated,
     super.key,
   });
 
@@ -73,6 +74,11 @@ class FormPreview extends StatefulWidget {
   /// (not [AppShell]) because only [FormPreview] has access to both [client]
   /// (for mock detection) and the build-time [_kUseA2uiHandoff] flag.
   final A2uiOutcomeEmitter? emitter;
+
+  /// Forwarded from [GenuiForm.onControllerCreated]. Lets the workbench shell
+  /// hold a reference to the active [FormController] for the progress drawer
+  /// without duplicating the inner [GenuiForm] state.
+  final void Function(FormController)? onControllerCreated;
 
   @override
   State<FormPreview> createState() => _FormPreviewState();
@@ -231,7 +237,10 @@ class _FormPreviewState extends State<FormPreview>
               outcomes: widget.outcomes,
               client: widget.client,
               model: widget.model,
-              onControllerCreated: (c) => _controller.value = c,
+              onControllerCreated: (c) {
+                _controller.value = c;
+                widget.onControllerCreated?.call(c);
+              },
               onComplete: _showHandoffToast,
               onEscalation: (rule) {
                 if (!mounted) return;
@@ -331,7 +340,6 @@ class _EscalationCard extends StatelessWidget {
 // ── Icon mapping ───────────────────────────────────────────────────────────────
 
 /// Maps a [SimulatedHandoff.icon] string to a Flutter [IconData].
-///
 /// See [iconForName] for the supported set; unknown names render as a flag.
 IconData _iconForHandoff(SimulatedHandoff handoff) => iconForName(handoff.icon);
 

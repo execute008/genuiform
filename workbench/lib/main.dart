@@ -44,11 +44,13 @@ class _WorkbenchRootState extends State<_WorkbenchRoot> {
   /// Enable with `--dart-define=USE_MOCK=true`.
   static const _useMock = bool.fromEnvironment('USE_MOCK');
 
-  static const _model = 'gemini-2.5-flash';
+  /// Initial model on first paint. Runtime-mutable via the toolbar dropdown.
+  static const _initialModel = 'gemini-flash-latest';
 
   late final ValueNotifier<String> _geminiKey;
   late final ValueNotifier<String> _apiKey;
   late final ValueNotifier<String> _projectId;
+  late final ValueNotifier<String> _model;
 
   @override
   void initState() {
@@ -56,6 +58,7 @@ class _WorkbenchRootState extends State<_WorkbenchRoot> {
     _geminiKey = ValueNotifier(_envGeminiKey);
     _apiKey = ValueNotifier(_envApiKey);
     _projectId = ValueNotifier(_envProjectId);
+    _model = ValueNotifier(_initialModel);
   }
 
   @override
@@ -63,6 +66,7 @@ class _WorkbenchRootState extends State<_WorkbenchRoot> {
     _geminiKey.dispose();
     _apiKey.dispose();
     _projectId.dispose();
+    _model.dispose();
     super.dispose();
   }
 

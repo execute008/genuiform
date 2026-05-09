@@ -4,52 +4,60 @@ import 'dsl_catalog.dart';
 
 /// A reference panel that lists every DSL primitive by group.
 ///
-/// Mounted as the [Scaffold]'s `endDrawer`. Each group is a collapsible
+/// Embedded as a sidebar inside the editor pane. Each group is a collapsible
 /// [ExpansionTile]; entries show the [DslPrimitive.signature] in a monospace
 /// font and the [DslPrimitive.description] below.
 ///
-/// The drawer is the inert, discoverability-focused counterpart to the inline
+/// The panel is the inert, discoverability-focused counterpart to the inline
 /// completion popup. Both read from the same [kDslCatalog] so additions stay
 /// in sync.
 class LegendDrawer extends StatelessWidget {
-  const LegendDrawer({super.key});
+  const LegendDrawer({required this.onClose, super.key});
+
+  /// Called when the user clicks the close (X) button in the panel header.
+  final VoidCallback onClose;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final groups = kDslCatalogByGroup;
 
-    return Drawer(
-      width: 420,
-      child: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _Header(theme: theme),
-            Expanded(
-              child: ListView(
-                padding: EdgeInsets.zero,
-                children: [
-                  for (final group in DslGroup.values)
-                    if (groups[group]?.isNotEmpty ?? false)
-                      _GroupSection(
-                        group: group,
-                        primitives: groups[group]!,
-                      ),
-                ],
-              ),
-            ),
-          ],
+    return Container(
+      width: 340,
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        border: Border(
+          left: BorderSide(color: theme.colorScheme.outlineVariant),
         ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _Header(theme: theme, onClose: onClose),
+          Expanded(
+            child: ListView(
+              padding: EdgeInsets.zero,
+              children: [
+                for (final group in DslGroup.values)
+                  if (groups[group]?.isNotEmpty ?? false)
+                    _GroupSection(
+                      group: group,
+                      primitives: groups[group]!,
+                    ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
 }
 
 class _Header extends StatelessWidget {
-  const _Header({required this.theme});
+  const _Header({required this.theme, required this.onClose});
 
   final ThemeData theme;
+  final VoidCallback onClose;
 
   @override
   Widget build(BuildContext context) {
@@ -87,7 +95,7 @@ class _Header extends StatelessWidget {
           ),
           IconButton(
             tooltip: 'Close',
-            onPressed: () => Navigator.of(context).maybePop(),
+            onPressed: onClose,
             icon: const Icon(Icons.close, size: 18),
           ),
         ],

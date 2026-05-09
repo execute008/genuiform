@@ -40,8 +40,12 @@ class FormController {
     required Strategy strategy,
   }) : _strategy = strategy;
 
-  /// The frozen configuration for this form session.
-  final FormConfig config;
+  /// The active configuration for this form session.
+  ///
+  /// Mutable internally so [rebuildConfig] can swap in a fresh [FormConfig]
+  /// (e.g. when the workbench DSL is edited) while preserving the in-flight
+  /// [Session]. Callers should treat this as read-only.
+  FormConfig config;
 
   final Strategy _strategy;
 
@@ -200,6 +204,74 @@ class FormController {
   Future<void> restart() async {
     _currentStep = null;
     await start();
+  }
+
+  /// Swaps in a new [FormConfig] without discarding the in-flight [Session].
+  ///
+  /// Used by the workbench when the DSL is edited mid-form: we want the user's
+  /// prior answers to survive (so they don't have to retype anything) while
+  /// the LLM regenerates the *current* step against the new contract / posture
+  /// / outcomes.
+  ///
+  /// Behaviour:
+  /// 1. If [newConfig] equals the current [config], does nothing.
+  /// 2. If the current node id is no longer present in [newConfig.outcomes]
+  ///    (the user renamed/removed it), the session can't be continued
+  ///    coherently — [restart] is called instead.
+  /// 3. Otherwise: replaces [config] in place, re-pegs `currentNode` to the
+  ///    matching node in the new tree, recomputes `runningContract`, drops
+  ///    any pending step, and re-runs the strategy loop so the LLM emits a
+  ///    fresh step against the updated DSL.
+  Future<void> rebuildConfig(FormConfig newConfig) async {
+    if (_disposed) return;
+    if (newConfig == config) return;
+
+    final currentNodeId = _session.currentNode.id;
+    final matchingNode = newConfig.outcomes
+        .descendants()
+        .where((n) => n.id == currentNodeId)
+        .firstOrNull;
+
+    if (matchingNode == null) {
+      // The DSL no longer contains the node the session is sitting on —
+      // there's no honest way to continue. Reset cleanly.
+      config = newConfig;
+      await restart();
+      return;
+    }
+
+    config = newConfig;
+
+    // Re-peg the session onto the matching node from the new tree, and
+    // recompute the running contract so completion checks reflect the edit.
+    final branchChoicesRaw = _session.answers['__branch_choices'];
+    final Map<String, String> chosenBranchOptions;
+    if (branchChoicesRaw is Map) {
+      chosenBranchOptions = Map<String, String>.fromEntries(
+        branchChoicesRaw.entries
+            .map((e) => MapEntry(e.key.toString(), e.value.toString())),
+      );
+    } else {
+      chosenBranchOptions = const {};
+    }
+
+    final newRunningContract = Session.composeRunningContract(
+      root: newConfig.outcomes,
+      currentNode: matchingNode,
+      chosenBranchOptions: chosenBranchOptions,
+    );
+
+    _session = _session.copyWith(
+      currentNode: matchingNode,
+      runningContract: newRunningContract,
+    );
+
+    // Drop the pending step — it was generated against the old config and
+    // the LLM is about to produce a replacement against the new one.
+    _currentStep = null;
+    _emitSession();
+
+    await _runStrategyLoop();
   }
 
   /// Closes both [StreamController]s.
