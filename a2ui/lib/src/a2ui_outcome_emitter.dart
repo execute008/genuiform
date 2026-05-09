@@ -33,7 +33,25 @@ class A2uiOutcomeEmitter {
     required this.client,
     this.model = 'gemini-2.5-flash',
     this.maxBufferBytes = 256 * 1024,
-  });
+  }) {
+    // The emitter relies on `generationConfig.responseJsonSchema` (full JSON
+    // Schema, 2.5+) to express the discriminated component union — see
+    // `a2uiOutcomeResponseJsonSchema()`. The `-latest` aliases on AI Studio
+    // currently route to the gemini-3 preview line, which rejects that
+    // field with a generic HTTP 400 INVALID_ARGUMENT. Fail loudly at
+    // construction so the misuse surfaces immediately instead of as a
+    // confusing stream error mid-flow.
+    if (model.endsWith('-latest')) {
+      throw ArgumentError.value(
+        model,
+        'model',
+        'A2uiOutcomeEmitter requires a model that accepts '
+            'generationConfig.responseJsonSchema. The `-latest` aliases '
+            'route to the gemini-3 preview line, which rejects it with '
+            'HTTP 400. Pass an explicit version like `gemini-2.5-flash`.',
+      );
+    }
+  }
 
   final LlmClient client;
   final String model;

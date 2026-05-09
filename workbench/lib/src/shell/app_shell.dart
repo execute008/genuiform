@@ -126,14 +126,20 @@ class _AppShellState extends State<AppShell> {
   final ValueNotifier<FormController?> _controllerRef =
       ValueNotifier<FormController?>(null);
 
-  /// Emitter constructed lazily and rebuilt whenever the user picks a new
-  /// model from the toolbar dropdown.
+  /// Emitter for the A2UI outcome path.
+  ///
+  /// Deliberately built without forwarding [widget.model.value]: the toolbar
+  /// dropdown is for the form-generation path (which uses Gemini's legacy
+  /// `responseSchema` and accepts every listed model). The A2UI outcome path
+  /// uses the newer `responseJsonSchema`, which the `-latest` aliases reject
+  /// with HTTP 400. Letting [A2uiOutcomeEmitter] use its `gemini-2.5-flash`
+  /// default keeps that path stable regardless of the picker.
   ///
   /// Always constructed (even when the client is a mock), because the gating
   /// decision — whether to actually call through to the emitter — lives in
   /// [FormPreview], which has visibility into both the client type and the
   /// compile-time [_kUseA2uiHandoff] flag.
-  late A2uiOutcomeEmitter _a2uiEmitter;
+  late final A2uiOutcomeEmitter _a2uiEmitter;
 
   @override
   void initState() {
@@ -162,15 +168,13 @@ class _AppShellState extends State<AppShell> {
       _syncUrl();
     }
 
-    // Construct the A2UI emitter for the initial model.
+    // Construct the A2UI emitter once and pin to its default model.
     // AppShell constructs always; FormPreview gates on client type + flag.
-    _a2uiEmitter = A2uiOutcomeEmitter(
-      client: widget.client,
-      model: widget.model.value,
-    );
+    _a2uiEmitter = A2uiOutcomeEmitter(client: widget.client);
 
-    // Rebuild the emitter and restart the form whenever the user picks a new
-    // model from the toolbar dropdown.
+    // Restart the form whenever the user picks a new model from the toolbar
+    // dropdown so the next form-generation step picks it up. The A2UI
+    // emitter is unaffected by the picker (see _a2uiEmitter docstring).
     widget.model.addListener(_onModelChanged);
   }
 
@@ -185,10 +189,6 @@ class _AppShellState extends State<AppShell> {
 
   void _onModelChanged() {
     setState(() {
-      _a2uiEmitter = A2uiOutcomeEmitter(
-        client: widget.client,
-        model: widget.model.value,
-      );
       // Bump the form key so any in-flight LLM call dies and the next step
       // is regenerated with the new model. Switching models mid-form is a
       // debug action; losing partial answers is acceptable.
