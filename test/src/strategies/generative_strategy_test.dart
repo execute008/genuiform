@@ -336,6 +336,41 @@ void main() {
       expect(events.first, isA<StreamError>());
     });
 
+    test('completes at a Layer with handoff (Layer id used as outcome_id)',
+        () async {
+      // Spec §6.2 GymGeist tree: `Layer('account_only', handoff: ...)` is a
+      // graceful exit point that may terminate the form. The LLM may pick
+      // `complete` with that Layer id when the layer's contract is satisfied
+      // and engagement is weak — this should fire the Layer's handoff and end
+      // the session, not error out.
+      Handoff accountHandoff = (_) {};
+      final accountLayer = Layer(
+        id: 'account_only',
+        contractDelta: Contract(fields: {}),
+        handoff: accountHandoff,
+        next: Outcome(
+          id: 'full_setup',
+          contractDelta: Contract(fields: {}),
+          handoff: null,
+        ),
+      );
+      final client = FakeLlmClient(
+        scriptedResponses: [_completeJson(outcomeId: 'account_only')],
+      );
+      final config = _makeConfig(client: client, outcomes: accountLayer);
+      final session = sampleSession(currentNode: accountLayer);
+      final strategy = GenerativeStrategy();
+
+      final events = await strategy.nextStep(session, config).toList();
+      expect(events, hasLength(1));
+      expect(events.first, isA<OutcomeReached>());
+
+      final reached = events.first as OutcomeReached;
+      expect(reached.outcome.id, 'account_only');
+      expect(reached.outcome.handoff, same(accountHandoff));
+      expect(reached.result.status, SessionStatus.completed);
+    });
+
     test('MinSteps refusal: emits StreamError before threshold', () async {
       final outcomeNode = Outcome(
         id: 'lead_qualified',
