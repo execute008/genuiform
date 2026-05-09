@@ -351,4 +351,69 @@ void main() {
       await controller.dispose();
     });
   });
+
+  group('FormController — retry after StreamError', () {
+    test(
+      'submitAnswer StreamError: history unchanged, step cleared, retryStrategy advances form',
+      () async {
+        final client = FakeLlmClient(scriptedResponses: [
+          _askStepJson(id: 'step_1', title: 'First question?'),
+          'not-valid-json: 503 overloaded',
+          _askStepJson(id: 'step_2', title: 'Second question?'),
+        ]);
+        final config = _makeConfig(client: client);
+        final controller = FormController(
+          config: config,
+          strategy: GenerativeStrategy(),
+        );
+
+        await controller.start();
+        expect(controller.currentStep?.id, 'step_1');
+
+        final events = <StepEvent>[];
+        controller.events.listen(events.add);
+
+        await controller.submitAnswer('Alice');
+
+        expect(controller.currentSession.history, hasLength(1),
+            reason: 'answer should be recorded once despite strategy failure');
+        expect(controller.currentStep, isNull,
+            reason: 'currentStep cleared so Next button cannot re-submit');
+        expect(events.last, isA<StreamError>());
+
+        await controller.retryStrategy();
+
+        expect(controller.currentSession.history, hasLength(1),
+            reason: 'retryStrategy must not append a duplicate history entry');
+        expect(controller.currentStep?.id, 'step_2');
+
+        await controller.dispose();
+      },
+    );
+
+    test(
+      'retryStrategy after start StreamError does not clear history',
+      () async {
+        final client = FakeLlmClient(scriptedResponses: [
+          'not-valid-json: 503 overloaded',
+          _askStepJson(id: 'step_1', title: 'First question?'),
+        ]);
+        final config = _makeConfig(client: client);
+        final controller = FormController(
+          config: config,
+          strategy: GenerativeStrategy(),
+        );
+
+        await controller.start();
+
+        expect(controller.currentSession.history, isEmpty);
+        expect(controller.currentStep, isNull);
+
+        await controller.retryStrategy();
+
+        expect(controller.currentStep?.id, 'step_1');
+        await controller.dispose();
+      },
+    );
+  });
 }
