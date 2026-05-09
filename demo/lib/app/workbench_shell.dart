@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import 'package:genuiform/genuiform.dart';
 import 'package:genuiform_a2ui/genuiform_a2ui.dart';
 
 import '../state/workbench_controller.dart';
@@ -67,8 +66,12 @@ class _WorkbenchShellState extends State<WorkbenchShell> {
         handoffMap: _controller.committedParseResult.handoffMap ?? const {},
         onRestartRequested: _controller.runOrReset,
         emitter: A2uiOutcomeEmitter(
-          client: _controller.buildClient(),
-          model: _controller.model.value,
+          source: GeminiA2uiOutcomeSource(
+            client: _controller.buildClient(),
+            model: _controller.model.value.endsWith('-latest')
+                ? 'gemini-2.5-flash'
+                : _controller.model.value,
+          ),
         ),
         onControllerCreated: (c) => _controller.controllerRef.value = c,
       ),

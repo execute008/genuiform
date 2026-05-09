@@ -69,8 +69,12 @@ class _DslEditorPanelState extends State<DslEditorPanel> {
                 handoffMap: widget.controller.committedParseResult.handoffMap ?? const {},
                 onRestartRequested: widget.controller.runOrReset,
                 emitter: A2uiOutcomeEmitter(
-                  client: widget.controller.buildClient(),
-                  model: widget.controller.model.value,
+                  source: GeminiA2uiOutcomeSource(
+                    client: widget.controller.buildClient(),
+                    model: widget.controller.model.value.endsWith('-latest')
+                        ? 'gemini-2.5-flash'
+                        : widget.controller.model.value,
+                  ),
                 ),
                 onControllerCreated: (c) => {},
               )

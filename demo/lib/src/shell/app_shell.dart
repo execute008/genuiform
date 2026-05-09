@@ -165,8 +165,12 @@ class _AppShellState extends State<AppShell> {
     // Construct the A2UI emitter for the initial model.
     // AppShell constructs always; FormPreview gates on client type + flag.
     _a2uiEmitter = A2uiOutcomeEmitter(
-      client: widget.client,
-      model: widget.model.value,
+      source: GeminiA2uiOutcomeSource(
+        client: widget.client,
+        model: widget.model.value.endsWith('-latest')
+            ? 'gemini-2.5-flash'
+            : widget.model.value,
+      ),
     );
 
     // Rebuild the emitter and restart the form whenever the user picks a new
@@ -186,8 +190,12 @@ class _AppShellState extends State<AppShell> {
   void _onModelChanged() {
     setState(() {
       _a2uiEmitter = A2uiOutcomeEmitter(
-        client: widget.client,
-        model: widget.model.value,
+        source: GeminiA2uiOutcomeSource(
+          client: widget.client,
+          model: widget.model.value.endsWith('-latest')
+              ? 'gemini-2.5-flash'
+              : widget.model.value,
+        ),
       );
       // Bump the form key so any in-flight LLM call dies and the next step
       // is regenerated with the new model. Switching models mid-form is a

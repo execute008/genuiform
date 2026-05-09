@@ -9,7 +9,6 @@ import '../services/gemini_service.dart';
 import '../src/parser/parse_dsl.dart';
 import '../src/llm/workbench_mock_llm_client.dart';
 import '../src/scenarios/scenarios.dart';
-import '../src/scenarios/scenario.dart' as WorkbenchScenario;
 
 /// Enhanced workbench controller with DSL editing and LLM client support.
 /// Combines demo UI with workbench functionality.
@@ -34,15 +33,10 @@ class WorkbenchController extends ChangeNotifier {
   
   // LLM Client configuration
   static const _envGeminiKey = String.fromEnvironment('GEMINI_API_KEY');
-  static const _envApiKey = String.fromEnvironment('VERTEX_API_KEY');
-  static const _envProjectId = String.fromEnvironment('VERTEX_PROJECT_ID');
-  static const _envLocation = String.fromEnvironment('VERTEX_LOCATION', defaultValue: 'europe-west1');
   static const _useMock = bool.fromEnvironment('USE_MOCK');
   static const _initialModel = 'gemini-flash-latest';
-  
+
   late final ValueNotifier<String> _geminiKey;
-  late final ValueNotifier<String> _apiKey;
-  late final ValueNotifier<String> _projectId;
   late final ValueNotifier<String> _model;
   
   // Form controller reference for progress drawer
@@ -79,8 +73,7 @@ class WorkbenchController extends ChangeNotifier {
   int get formKey => _formKey;
   ValueNotifier<String> get model => _model;
   
-  bool get hasGemini => _geminiKey.value.isNotEmpty;
-  bool get hasVertex => _apiKey.value.isNotEmpty && _projectId.value.isNotEmpty;
+  bool get hasGemini => _geminiKey.value.isNotEmpty || _geminiService.hasApiKey;
   
   static const candidateModels = <String>[
     'gemini-flash-latest',
@@ -136,8 +129,6 @@ class WorkbenchController extends ChangeNotifier {
     
     // Initialize LLM client configuration
     _geminiKey = ValueNotifier(_envGeminiKey);
-    _apiKey = ValueNotifier(_envApiKey);
-    _projectId = ValueNotifier(_envProjectId);
     _model = ValueNotifier(_initialModel);
     
     // Initialize DSL with first scenario
@@ -315,12 +306,10 @@ class WorkbenchController extends ChangeNotifier {
   
   LlmClient buildClient() {
     if (_useMock) return WorkbenchMockLlmClient();
-    if (hasGemini) return GeminiApiClient(apiKey: _geminiKey.value);
-    return VertexDirectClient(
-      apiKey: _apiKey.value,
-      projectId: _projectId.value,
-      location: _envLocation,
-    );
+    final key = _geminiKey.value.isNotEmpty
+        ? _geminiKey.value
+        : (_geminiService.apiKey ?? '');
+    return GeminiApiClient(apiKey: key);
   }
   
   @override
@@ -328,8 +317,6 @@ class WorkbenchController extends ChangeNotifier {
     _debounce?.cancel();
     _commitDebounce?.cancel();
     _geminiKey.dispose();
-    _apiKey.dispose();
-    _projectId.dispose();
     _model.dispose();
     super.dispose();
   }
