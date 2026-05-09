@@ -7,7 +7,6 @@ export default $config({
       removal: input?.stage === "production" ? "retain" : "remove",
       protect: ["production"].includes(input?.stage),
       home: "aws",
-      providers: { aws: { region: "eu-central-1" } },
     };
   },
   async run() {
@@ -26,7 +25,7 @@ export default $config({
         command: "flutter build web --release",
         output: "build/web",
       },
-      domain: "demo-genuiform.draht.dev",
+      domain: "workbench.genuiform.draht.dev",
     });
 
     return {

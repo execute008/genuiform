@@ -8,7 +8,7 @@ export default function Workbench() {
           <div className="wb-dots">
             <span></span><span></span><span></span>
           </div>
-          <div className="wb-url">workbench.genuiform.dev</div>
+          <div className="wb-url">workbench.genuiform.draht.dev</div>
         </div>
         <div className="wb-topbar">
           <div className="wb-logo"></div>
