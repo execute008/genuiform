@@ -42,3 +42,4 @@ migrate_working_dir/
 lcov.info
 .claude/
 a2ui/build
+www/.sst

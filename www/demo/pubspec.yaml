@@ -17,9 +17,9 @@ dependencies:
   
   # Add genuiform dependencies
   genuiform:
-    path: ../
+    path: ../../
   genuiform_a2ui:
-    path: ../a2ui
+    path: ../../a2ui
     
   # Code editor dependencies
   re_editor: ^0.8.0

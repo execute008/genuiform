@@ -246,14 +246,14 @@ packages:
   genuiform:
     dependency: "direct main"
     description:
-      path: ".."
+      path: "../.."
       relative: true
     source: path
     version: "0.1.0-dev"
   genuiform_a2ui:
     dependency: "direct main"
     description:
-      path: "../a2ui"
+      path: "../../a2ui"
       relative: true
     source: path
     version: "0.1.0-dev"
