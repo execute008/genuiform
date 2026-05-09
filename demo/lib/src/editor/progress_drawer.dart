@@ -230,7 +230,7 @@ class _ProgressBodyState extends State<_ProgressBody> {
               : ListView.separated(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
                   itemCount: history.length,
-                  separatorBuilder: (_, _) => const Divider(height: 16),
+                  separatorBuilder: (_, __) => const Divider(height: 16),
                   itemBuilder: (context, i) {
                     final answer = history[i];
                     return _AnswerRow(index: i + 1, answer: answer);

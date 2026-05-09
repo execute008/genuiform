@@ -45,6 +45,9 @@ class WorkbenchController extends ChangeNotifier {
   late final ValueNotifier<String> _projectId;
   late final ValueNotifier<String> _model;
   
+  // Form controller reference for progress drawer
+  final ValueNotifier<FormController?> controllerRef = ValueNotifier<FormController?>(null);
+  
   static const Duration _kCommitDebounce = Duration(milliseconds: 2000);
   
   final GeminiService _geminiService = GeminiService();
@@ -81,9 +84,10 @@ class WorkbenchController extends ChangeNotifier {
   
   static const candidateModels = <String>[
     'gemini-flash-latest',
-    'gemini-pro-latest', 
     'gemini-2.5-flash',
     'gemini-2.5-pro',
+    'gemini-3-flash-preview',
+    'gemini-3-pro-preview',
   ];
 
   static const Map<String, List<String>> _followups = {

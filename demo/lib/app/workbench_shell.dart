@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 
+import 'package:genuiform/genuiform.dart';
 import 'package:genuiform_a2ui/genuiform_a2ui.dart';
 
 import '../state/workbench_controller.dart';
 import '../theme/app_spacing.dart';
 import '../widgets/api_key_dialog.dart';
 import '../src/editor/code_editor.dart';
+import '../src/editor/progress_drawer.dart';
 import '../src/preview/form_preview.dart';
 import '../src/scenarios/scenarios.dart';
 import '../models/chat_message.dart';
@@ -68,6 +70,7 @@ class _WorkbenchShellState extends State<WorkbenchShell> {
           client: _controller.buildClient(),
           model: _controller.model.value,
         ),
+        onControllerCreated: (c) => _controller.controllerRef.value = c,
       ),
     );
   }
@@ -179,6 +182,23 @@ class _TopBar extends StatelessWidget {
           const SizedBox(width: AppSpacing.s4),
 
           const Spacer(),
+          IconButton(
+            tooltip: 'Contract progress',
+            onPressed: () {
+              showModalBottomSheet(
+                context: context,
+                isScrollControlled: true,
+                builder: (context) => Container(
+                  height: MediaQuery.of(context).size.height * 0.75,
+                  child: ProgressDrawer(
+                    controllerRef: controller.controllerRef,
+                  ),
+                ),
+              );
+            },
+            icon: const Icon(Icons.timeline_outlined, size: 18),
+          ),
+          const SizedBox(width: AppSpacing.s2),
           FilledButton.icon(
             icon: const Icon(Icons.play_arrow, size: 16),
             label: const Text('Run'),
