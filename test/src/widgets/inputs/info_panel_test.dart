@@ -102,6 +102,44 @@ void main() {
       expect(emitted, equals(true));
     });
 
+    testWidgets(
+        'tapping Continue calls onChanged(true) then onSubmit, in order',
+        (tester) async {
+      final calls = <String>[];
+      await tester.pumpWidget(_wrap(
+        InfoPanel(
+          spec: _infoSpec(information: 'Read this'),
+          value: null,
+          onChanged: (v) => calls.add('changed:$v'),
+          onSubmit: () => calls.add('submit'),
+        ),
+      ));
+
+      await tester.tap(find.text('Continue'));
+      await tester.pump();
+
+      expect(calls, equals(['changed:true', 'submit']));
+    });
+
+    testWidgets('tapping Continue without onSubmit only calls onChanged',
+        (tester) async {
+      var submitCalls = 0;
+      dynamic emitted;
+      await tester.pumpWidget(_wrap(
+        InfoPanel(
+          spec: _infoSpec(information: 'Read this'),
+          value: null,
+          onChanged: (v) => emitted = v,
+        ),
+      ));
+
+      await tester.tap(find.text('Continue'));
+      await tester.pump();
+
+      expect(emitted, equals(true));
+      expect(submitCalls, equals(0));
+    });
+
     testWidgets('shows validation message when set', (tester) async {
       await tester.pumpWidget(_wrap(
         InfoPanel(

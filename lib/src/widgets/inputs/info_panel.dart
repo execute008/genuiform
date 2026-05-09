@@ -12,13 +12,16 @@ import '_validation_message.dart';
 /// Renders a [Card] with:
 /// - [spec.title] as a header (if non-null).
 /// - The information text as the body.
-/// - A "Continue" [FilledButton] that calls `onChanged(true)`, signalling
-///   the user has acknowledged the information and is ready to proceed.
+/// - A "Continue" [FilledButton] that calls `onChanged(true)` (acknowledging
+///   the information) and, when [onSubmit] is provided, immediately advances
+///   the form. Info/consent steps have no other input to capture, so the
+///   button serves as both acknowledgement and submit.
 class InfoPanel extends StatelessWidget {
   const InfoPanel({
     required this.spec,
     required this.value,
     required this.onChanged,
+    this.onSubmit,
     this.validationMessage,
     super.key,
   });
@@ -26,6 +29,11 @@ class InfoPanel extends StatelessWidget {
   final QuizStepSpec spec;
   final dynamic value;
   final ValueChanged<dynamic> onChanged;
+
+  /// When non-null, tapping Continue also advances the form. Wired by
+  /// [GenuiForm] so the Continue button is the single CTA for info/consent
+  /// steps and the global Next button can stay hidden.
+  final VoidCallback? onSubmit;
   final String? validationMessage;
 
   @override
@@ -60,7 +68,10 @@ class InfoPanel extends StatelessWidget {
         ),
         const SizedBox(height: 16),
         FilledButton(
-          onPressed: () => onChanged(true),
+          onPressed: () {
+            onChanged(true);
+            onSubmit?.call();
+          },
           child: const Text('Continue'),
         ),
         ValidationMessage(validationMessage),

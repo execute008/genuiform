@@ -16,6 +16,7 @@ class StepRenderer extends StatelessWidget {
     required this.spec,
     required this.value,
     required this.onChanged,
+    this.onSubmit,
     this.validationMessage,
     super.key,
   });
@@ -29,6 +30,10 @@ class StepRenderer extends StatelessWidget {
 
   /// Called whenever the user changes the input value.
   final ValueChanged<dynamic> onChanged;
+
+  /// Forwarded to inputs whose primary CTA also acts as the form's submit
+  /// (currently only [InfoPanel] for info/consent steps).
+  final VoidCallback? onSubmit;
 
   /// Validation error message to display beneath the input, if any.
   final String? validationMessage;
@@ -76,6 +81,7 @@ class StepRenderer extends StatelessWidget {
           spec: spec,
           value: value,
           onChanged: onChanged,
+          onSubmit: onSubmit,
           validationMessage: validationMessage,
         ),
     };

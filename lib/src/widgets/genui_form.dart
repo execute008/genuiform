@@ -5,6 +5,7 @@ import '../models/contract.dart';
 import '../models/form_result.dart';
 import '../models/outcomes.dart';
 import '../models/posture.dart';
+import '../models/quiz_input_type.dart';
 import '../models/session.dart';
 import '../models/session_status.dart';
 import '../models/step_event.dart';
@@ -272,6 +273,7 @@ class _GenuiFormState extends State<GenuiForm> {
               spec: currentStep,
               value: _currentValue,
               onChanged: (v) => setState(() => _currentValue = v),
+              onSubmit: _submitAnswer,
             ),
           ] else if (!isAwaiting) ...[
             // No step yet and not awaiting — show a placeholder
@@ -290,7 +292,11 @@ class _GenuiFormState extends State<GenuiForm> {
           ],
 
           // ── Next button ────────────────────────────────────────────────
-          if (currentStep != null && !isAwaiting)
+          // Hidden for info/consent steps where the InfoPanel's Continue
+          // button is the sole CTA and already submits.
+          if (currentStep != null &&
+              !isAwaiting &&
+              currentStep.inputType != QuizInputType.noneJustInformation)
             FilledButton(
               onPressed: _submitAnswer,
               child: const Text('Next'),
