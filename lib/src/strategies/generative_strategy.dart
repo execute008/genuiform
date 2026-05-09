@@ -171,7 +171,7 @@ class GenerativeStrategy extends Strategy {
               yield StreamError(error: 'Failed to parse exit_offer spec: $e');
               return;
             }
-            yield StepReady(spec: exitSpec);
+            yield StepReady(spec: exitSpec, isExitOffer: true);
           }
 
         // ── resolve_branch ────────────────────────────────────────────────────

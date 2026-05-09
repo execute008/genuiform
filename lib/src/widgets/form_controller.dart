@@ -407,12 +407,20 @@ class FormController {
     _emitEvent(event);
 
     switch (event) {
-      case StepReady(:final spec):
+      case StepReady(:final spec, :final isExitOffer):
         _currentStep = spec;
+        // Clear any pending exit once the LLM emits a regular ask_step.
+        // Exit-offer steps (isExitOffer: true) keep the pending flag alive so
+        // the next turn's [CONTEXT] still carries `pending_exit_layer`.
+        if (!isExitOffer) {
+          _session = _session.copyWith(pendingExitLayerId: null);
+        }
         _emitSession();
 
-      case LayerComplete():
-        // Update currentNode if session is currently at a layer that has a next
+      case LayerComplete(:final layer, :final offerExit):
+        // Advance currentNode so the next layer's contract fields come into
+        // scope — necessary even on offer_exit so a declined exit continues
+        // into the next layer normally.
         final navigator = OutcomeNavigator(config.outcomes);
         final next = navigator.advance(_session);
         if (next != null) {
@@ -423,7 +431,13 @@ class FormController {
           _session = _session.copyWith(
             currentNode: next,
             runningContract: newContract,
+            // Track which layer's exit was offered so the next [CONTEXT] block
+            // carries `pending_exit_layer`, giving the LLM a deterministic
+            // signal rather than relying on conversation inference.
+            pendingExitLayerId: offerExit ? layer.id : null,
           );
+        } else if (offerExit) {
+          _session = _session.copyWith(pendingExitLayerId: layer.id);
         }
         _emitSession();
 
@@ -460,9 +474,13 @@ class FormController {
             currentNode: nextNode,
             answers: updatedAnswers,
             runningContract: newContract,
+            pendingExitLayerId: null,
           );
         } else {
-          _session = _session.copyWith(answers: updatedAnswers);
+          _session = _session.copyWith(
+            answers: updatedAnswers,
+            pendingExitLayerId: null,
+          );
         }
         _emitSession();
 
@@ -470,6 +488,7 @@ class FormController {
         _session = _session.copyWith(
           status: SessionStatus.completed,
           reachedOutcome: outcome,
+          pendingExitLayerId: null,
         );
         _emitSession();
 

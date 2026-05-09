@@ -69,6 +69,10 @@ INSTRUCTIONS:
 - If pacing is high and engagement is strong, push toward deeper layers.
 - If pacing is low or engagement is negative, offer the current Layer's exit.
 - Never invent input types. Use only: slider, choice, multiChoice, text, number, date, noneJustInformation.
+- Layers marked [EXIT POINT] in the outcome tree are valid early-completion points.
+- HANDOFF RULE — if [CONTEXT] contains `pending_exit_layer: <id>`, you just offered an exit at that Layer and the user has now responded. You MUST act immediately:
+  * User accepted (any affirmative response) → emit `complete` with `outcome_id: <id>`. No further confirmation.
+  * User declined → emit `ask_step` to continue. Never re-offer the same exit.
 
 Return ONLY valid JSON matching the schema. No prose, no markdown.''';
 }
@@ -101,10 +105,14 @@ String buildDynamicTurnContext(FormConfig config, Session session) {
           deltaFields.entries.map((e) => MapEntry(e.key, e.value as dynamic)),
         )));
 
+  final pendingExitLine = session.pendingExitLayerId != null
+      ? '\npending_exit_layer: ${session.pendingExitLayerId}'
+      : '';
+
   return '''[CONTEXT]
 current_node: ${session.currentNode.id}
 contract_delta: $deltaSection
-last_engagement: ${session.lastSignal.wireValue}''';
+last_engagement: ${session.lastSignal.wireValue}$pendingExitLine''';
 }
 
 /// Builds the §10.1 generative system prompt from [config] and [session].
@@ -260,7 +268,7 @@ void _renderNodeStatic(
 
   switch (node) {
     case Layer(:final id, :final next):
-      buffer.writeln('$indent${connector}Layer[$id]');
+      buffer.writeln('$indent${connector}Layer[$id] [EXIT POINT]');
       if (next != null) {
         _renderNodeStatic(next, indent + childIndent, true, buffer);
       }
