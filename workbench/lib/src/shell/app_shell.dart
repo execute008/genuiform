@@ -63,6 +63,7 @@ class AppShell extends StatefulWidget {
   /// cover that family.
   static const candidateModels = <String>[
     'gemini-flash-latest',
+    'gemini-flash-lite-latest',
     'gemini-pro-latest',
     'gemini-2.5-flash',
     'gemini-2.5-pro',
@@ -185,8 +186,10 @@ class _AppShellState extends State<AppShell> {
     // initial temperature. AppShell constructs always; FormPreview gates on
     // client type + flag.
     _a2uiEmitter = A2uiOutcomeEmitter(
-      client: widget.client,
-      temperature: widget.temperature.value,
+      source: GeminiA2uiOutcomeSource(
+        client: widget.client,
+        temperature: widget.temperature.value,
+      ),
     );
 
     // Restart the form whenever the user picks a new model from the toolbar
@@ -223,8 +226,10 @@ class _AppShellState extends State<AppShell> {
   void _onTemperatureChanged() {
     setState(() {
       _a2uiEmitter = A2uiOutcomeEmitter(
-        client: widget.client,
-        temperature: widget.temperature.value,
+        source: GeminiA2uiOutcomeSource(
+          client: widget.client,
+          temperature: widget.temperature.value,
+        ),
       );
     });
   }

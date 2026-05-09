@@ -19,12 +19,12 @@ import 'package:genuiform/genuiform.dart';
 
 import 'package:genuiform_a2ui/genuiform_a2ui.dart';
 
-// ─── Fake emitter helpers ─────────────────────────────────────────────────────
+// ─── Fake source helpers ──────────────────────────────────────────────────────
 
-/// A minimal fake [A2uiOutcomeEmitter] that returns a pre-configured stream
+/// A minimal fake [A2uiOutcomeSource] that returns a pre-configured stream
 /// of string chunks. It does NOT actually call Vertex.
-class _FakeEmitter extends A2uiOutcomeEmitter {
-  _FakeEmitter(this._stream) : super(client: _NoopLlmClient());
+class _FakeSource implements A2uiOutcomeSource {
+  _FakeSource(this._stream);
 
   final Stream<String> _stream;
 
@@ -38,12 +38,10 @@ class _FakeEmitter extends A2uiOutcomeEmitter {
       _stream;
 }
 
-/// Fake emitter that simulates the buffer-then-yield pattern: it produces no
+/// Fake source that simulates the buffer-then-yield pattern: it produces no
 /// chunks but invokes [onDelta] each time a controller adds. Used to exercise
 /// the loader's inactivity watchdog without involving real LLM clients.
-class _DeltaSimEmitter extends A2uiOutcomeEmitter {
-  _DeltaSimEmitter() : super(client: _NoopLlmClient());
-
+class _DeltaSimSource implements A2uiOutcomeSource {
   final StreamController<void> deltas = StreamController<void>.broadcast();
 
   @override
@@ -63,25 +61,8 @@ class _DeltaSimEmitter extends A2uiOutcomeEmitter {
   }
 }
 
-/// An [LlmClient] that should never be called (constructor requirement for
-/// [A2uiOutcomeEmitter] but the fake overrides [emit] entirely).
-class _NoopLlmClient extends LlmClient {
-  @override
-  Stream<String> generate({
-    required String systemPrompt,
-    required List<Message> messages,
-    required Map<String, dynamic> responseSchema,
-    required String model,
-    double temperature = 0.7,
-  }) {
-    throw StateError('_NoopLlmClient.generate should never be called');
-  }
-}
-
-/// A fake emitter that records the [summary] and [handoff] it received.
-class _CaptureSummaryEmitter extends A2uiOutcomeEmitter {
-  _CaptureSummaryEmitter() : super(client: _NoopLlmClient());
-
+/// A fake source that records the [summary] and [handoff] it received.
+class _CaptureSummarySource implements A2uiOutcomeSource {
   String? capturedSummary;
   SimulatedHandoff? capturedHandoff;
 
@@ -97,6 +78,19 @@ class _CaptureSummaryEmitter extends A2uiOutcomeEmitter {
     return Stream.fromIterable(['chunk_one', 'chunk_two']);
   }
 }
+
+// ─── Helpers to build loader from sources ─────────────────────────────────────
+
+A2uiOutcomeLoader _loaderFromSource(
+  A2uiOutcomeSource source, {
+  Duration firstChunkTimeout = const Duration(milliseconds: 100),
+  Duration inactivityTimeout = const Duration(seconds: 15),
+}) =>
+    A2uiOutcomeLoader.withTimeout(
+      emitter: A2uiOutcomeEmitter(source: source),
+      firstChunkTimeout: firstChunkTimeout,
+      inactivityTimeout: inactivityTimeout,
+    );
 
 // ─── FormResult factory helpers ───────────────────────────────────────────────
 
@@ -120,9 +114,8 @@ void main() {
   group('A2uiOutcomeLoader — happy path', () {
     test('forwards all chunks from the emitter unchanged', () async {
       const chunks = ['chunk_a', 'chunk_b', 'chunk_c'];
-      final emitter = _FakeEmitter(Stream.fromIterable(chunks));
-      final loader = A2uiOutcomeLoader.withTimeout(
-        emitter: emitter,
+      final loader = _loaderFromSource(
+        _FakeSource(Stream.fromIterable(chunks)),
         firstChunkTimeout: shortTimeout,
       );
 
@@ -134,9 +127,8 @@ void main() {
     });
 
     test('works with a single-chunk stream', () async {
-      final emitter = _FakeEmitter(Stream.value('only_chunk'));
-      final loader = A2uiOutcomeLoader.withTimeout(
-        emitter: emitter,
+      final loader = _loaderFromSource(
+        _FakeSource(Stream.value('only_chunk')),
         firstChunkTimeout: shortTimeout,
       );
 
@@ -148,9 +140,8 @@ void main() {
     });
 
     test('stream closes cleanly after all chunks arrive', () async {
-      final emitter = _FakeEmitter(Stream.fromIterable(['a', 'b']));
-      final loader = A2uiOutcomeLoader.withTimeout(
-        emitter: emitter,
+      final loader = _loaderFromSource(
+        _FakeSource(Stream.fromIterable(['a', 'b'])),
         firstChunkTimeout: shortTimeout,
       );
 
@@ -172,9 +163,8 @@ void main() {
   group('A2uiOutcomeLoader — error propagation', () {
     test('propagates AuthError as stream error', () async {
       const error = AuthError('Bad key');
-      final emitter = _FakeEmitter(Stream.error(error));
-      final loader = A2uiOutcomeLoader.withTimeout(
-        emitter: emitter,
+      final loader = _loaderFromSource(
+        _FakeSource(Stream.error(error)),
         firstChunkTimeout: shortTimeout,
       );
 
@@ -186,9 +176,8 @@ void main() {
 
     test('propagates RateLimitError as stream error', () async {
       const error = RateLimitError('Quota hit');
-      final emitter = _FakeEmitter(Stream.error(error));
-      final loader = A2uiOutcomeLoader.withTimeout(
-        emitter: emitter,
+      final loader = _loaderFromSource(
+        _FakeSource(Stream.error(error)),
         firstChunkTimeout: shortTimeout,
       );
 
@@ -200,9 +189,8 @@ void main() {
 
     test('propagates SchemaError as stream error', () async {
       const error = SchemaError('Bad schema');
-      final emitter = _FakeEmitter(Stream.error(error));
-      final loader = A2uiOutcomeLoader.withTimeout(
-        emitter: emitter,
+      final loader = _loaderFromSource(
+        _FakeSource(Stream.error(error)),
         firstChunkTimeout: shortTimeout,
       );
 
@@ -214,9 +202,8 @@ void main() {
 
     test('propagates NetworkError as stream error', () async {
       const error = NetworkError('Offline');
-      final emitter = _FakeEmitter(Stream.error(error));
-      final loader = A2uiOutcomeLoader.withTimeout(
-        emitter: emitter,
+      final loader = _loaderFromSource(
+        _FakeSource(Stream.error(error)),
         firstChunkTimeout: shortTimeout,
       );
 
@@ -229,9 +216,8 @@ void main() {
     test('emits no data chunks before the error — stream has only error event',
         () async {
       const error = AuthError('gone');
-      final emitter = _FakeEmitter(Stream.error(error));
-      final loader = A2uiOutcomeLoader.withTimeout(
-        emitter: emitter,
+      final loader = _loaderFromSource(
+        _FakeSource(Stream.error(error)),
         firstChunkTimeout: shortTimeout,
       );
 
@@ -264,9 +250,8 @@ void main() {
       final controller = StreamController<String>();
       addTearDown(controller.close);
 
-      final emitter = _FakeEmitter(controller.stream);
-      final loader = A2uiOutcomeLoader.withTimeout(
-        emitter: emitter,
+      final loader = _loaderFromSource(
+        _FakeSource(controller.stream),
         firstChunkTimeout: shortTimeout,
       );
 
@@ -280,9 +265,8 @@ void main() {
       final controller = StreamController<String>();
       addTearDown(controller.close);
 
-      final emitter = _FakeEmitter(controller.stream);
-      final loader = A2uiOutcomeLoader.withTimeout(
-        emitter: emitter,
+      final loader = _loaderFromSource(
+        _FakeSource(controller.stream),
         firstChunkTimeout: shortTimeout,
       );
 
@@ -312,10 +296,8 @@ void main() {
       // passed (relative to subscription time).
       final controller = StreamController<String>();
 
-      final emitter = _FakeEmitter(controller.stream);
-      // Use a 50ms timeout; second chunk will arrive at ~120ms.
-      final loader = A2uiOutcomeLoader.withTimeout(
-        emitter: emitter,
+      final loader = _loaderFromSource(
+        _FakeSource(controller.stream),
         firstChunkTimeout: const Duration(milliseconds: 50),
       );
 
@@ -352,10 +334,10 @@ void main() {
   // loader resets its inactivity timer on each call.
   group('A2uiOutcomeLoader — inactivity watchdog', () {
     test('fires TimeoutException when emitter delivers no deltas', () async {
-      final emitter = _DeltaSimEmitter();
-      addTearDown(emitter.deltas.close);
+      final deltaSource = _DeltaSimSource();
+      addTearDown(deltaSource.deltas.close);
       final loader = A2uiOutcomeLoader.withTimeout(
-        emitter: emitter,
+        emitter: A2uiOutcomeEmitter(source: deltaSource),
         firstChunkTimeout: const Duration(seconds: 30),
         inactivityTimeout: const Duration(milliseconds: 80),
       );
@@ -381,12 +363,12 @@ void main() {
     });
 
     test('does not fire while deltas keep arriving', () async {
-      final emitter = _DeltaSimEmitter();
-      addTearDown(emitter.deltas.close);
+      final deltaSource = _DeltaSimSource();
+      addTearDown(deltaSource.deltas.close);
       // Inactivity = 80ms, but we'll add() every 30ms, so timer keeps
       // resetting for the duration of the test.
       final loader = A2uiOutcomeLoader.withTimeout(
-        emitter: emitter,
+        emitter: A2uiOutcomeEmitter(source: deltaSource),
         firstChunkTimeout: const Duration(seconds: 30),
         inactivityTimeout: const Duration(milliseconds: 80),
       );
@@ -405,7 +387,7 @@ void main() {
       // inactivity timeout, the watchdog would have fired ≥3× without resets.
       for (var i = 0; i < 8; i++) {
         await Future<void>.delayed(const Duration(milliseconds: 30));
-        emitter.deltas.add(null);
+        deltaSource.deltas.add(null);
       }
 
       // Verify watchdog has NOT fired despite > inactivityTimeout total time.
@@ -415,7 +397,9 @@ void main() {
     test('default inactivityTimeout is set on the no-arg constructor', () {
       // Regression guard: the default-args constructor must wire up an
       // inactivity timeout (the caller doesn't have to specify one).
-      final loader = A2uiOutcomeLoader(emitter: _FakeEmitter(const Stream.empty()));
+      final loader = A2uiOutcomeLoader(
+        emitter: A2uiOutcomeEmitter(source: _FakeSource(const Stream.empty())),
+      );
       expect(
         loader.inactivityTimeout,
         greaterThan(Duration.zero),
@@ -438,14 +422,15 @@ void main() {
   group('A2uiOutcomeLoader — default first-chunk timeout', () {
     test('default constructor sets a timeout that accommodates buffered LLM clients',
         () {
-      // Regression guard: VertexDirectClient and GeminiApiClient both buffer
-      // the entire HTTP response before yielding a single chunk, so the
+      // Regression guard: GeminiApiClient buffers the entire HTTP response
+      // before yielding chunks, so the
       // "first chunk" arrival time equals the entire LLM call wall-clock
       // time. For gemini-flash-latest with structured output, this routinely
       // exceeds 5s. The default timeout must be generous enough to cover
       // realistic LLM round-trips, otherwise the renderer falls back to v1.
-      final emitter = _FakeEmitter(const Stream.empty());
-      final loader = A2uiOutcomeLoader(emitter: emitter);
+      final loader = A2uiOutcomeLoader(
+        emitter: A2uiOutcomeEmitter(source: _FakeSource(const Stream.empty())),
+      );
 
       expect(
         loader.firstChunkTimeout,
@@ -461,9 +446,9 @@ void main() {
 
   group('A2uiOutcomeLoader — summary building', () {
     test('summary with no fields is just the outcome id', () async {
-      final cap = _CaptureSummaryEmitter();
+      final cap = _CaptureSummarySource();
       final loader = A2uiOutcomeLoader.withTimeout(
-        emitter: cap,
+        emitter: A2uiOutcomeEmitter(source: cap),
         firstChunkTimeout: shortTimeout,
       );
 
@@ -475,9 +460,9 @@ void main() {
     });
 
     test('summary includes collected field key=value pairs', () async {
-      final cap = _CaptureSummaryEmitter();
+      final cap = _CaptureSummarySource();
       final loader = A2uiOutcomeLoader.withTimeout(
-        emitter: cap,
+        emitter: A2uiOutcomeEmitter(source: cap),
         firstChunkTimeout: shortTimeout,
       );
 
@@ -500,9 +485,9 @@ void main() {
 
     test('handoff is passed through to the emitter', () async {
       const handoff = SimulatedHandoff(label: 'Book a call', icon: 'calendar');
-      final cap = _CaptureSummaryEmitter();
+      final cap = _CaptureSummarySource();
       final loader = A2uiOutcomeLoader.withTimeout(
-        emitter: cap,
+        emitter: A2uiOutcomeEmitter(source: cap),
         firstChunkTimeout: shortTimeout,
       );
 
@@ -514,9 +499,9 @@ void main() {
     });
 
     test('null handoff is passed through to the emitter', () async {
-      final cap = _CaptureSummaryEmitter();
+      final cap = _CaptureSummarySource();
       final loader = A2uiOutcomeLoader.withTimeout(
-        emitter: cap,
+        emitter: A2uiOutcomeEmitter(source: cap),
         firstChunkTimeout: shortTimeout,
       );
 

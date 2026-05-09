@@ -17,17 +17,16 @@ import 'package:genuiform_a2ui/genuiform_a2ui.dart';
 // ─── Inline schema validation helpers ────────────────────────────────────────
 
 /// Checks that [value] satisfies the top-level schema produced by
-/// [a2uiOutcomeResponseSchema].
+/// [a2uiOutcomeJsonSchema].
 ///
 /// Returns null on success, or a human-readable error string on failure.
-/// This is not a full JSON Schema validator — it covers the constraints that
-/// matter for Phase 1: required keys, enum on `catalogId`, required keys in
-/// `components` items, and the `component` enum.
+/// Covers the structural constraints that matter for the bug-fix regression
+/// guard: required keys, anyOf-discriminator on `component`, per-branch
+/// required keys.
 String? _validateSchema(
   Map<String, dynamic> schema,
   Map<String, dynamic> value,
 ) {
-  // Top-level required keys
   final topRequired = (schema['required'] as List).cast<String>();
   for (final key in topRequired) {
     if (!value.containsKey(key)) {
@@ -35,7 +34,6 @@ String? _validateSchema(
     }
   }
 
-  // createSurface sub-object
   final csSchema =
       schema['properties']['createSurface'] as Map<String, dynamic>;
   final csValue = value['createSurface'] as Map<String, dynamic>;
@@ -45,14 +43,12 @@ String? _validateSchema(
       return 'createSurface: missing required key "$key"';
     }
   }
-  // catalogId enum
   final catalogIdEnum =
       (csSchema['properties']['catalogId']['enum'] as List).cast<String>();
   if (!catalogIdEnum.contains(csValue['catalogId'])) {
     return 'createSurface.catalogId "${csValue['catalogId']}" not in enum $catalogIdEnum';
   }
 
-  // updateComponents sub-object
   final ucSchema =
       schema['properties']['updateComponents'] as Map<String, dynamic>;
   final ucValue = value['updateComponents'] as Map<String, dynamic>;
@@ -63,28 +59,55 @@ String? _validateSchema(
     }
   }
 
-  // components array items
+  // components array — items use anyOf discriminated by `component`.
   final itemSchema =
       ucSchema['properties']['components']['items'] as Map<String, dynamic>;
-  final itemRequired = (itemSchema['required'] as List).cast<String>();
-  final componentEnum =
-      (itemSchema['properties']['component']['enum'] as List).cast<String>();
+  final branches = (itemSchema['anyOf'] as List).cast<Map<String, dynamic>>();
 
   final components = (ucValue['components'] as List).cast<Map<String, dynamic>>();
   for (var i = 0; i < components.length; i++) {
     final item = components[i];
-    for (final key in itemRequired) {
-      if (!item.containsKey(key)) {
-        return 'components[$i]: missing required key "$key"';
-      }
+    final componentType = item['component'] as String?;
+    if (componentType == null) {
+      return 'components[$i]: missing required key "component"';
     }
-    final componentType = item['component'] as String;
-    if (!componentEnum.contains(componentType)) {
-      return 'components[$i].component "$componentType" not in allowed enum $componentEnum';
+    final match = branches.where((b) {
+      final names =
+          ((b['properties'] as Map)['component']['enum'] as List).cast<String>();
+      return names.contains(componentType);
+    }).firstOrNull;
+    if (match == null) {
+      final allowed = branches
+          .map((b) =>
+              ((b['properties'] as Map)['component']['enum'] as List).first)
+          .toList();
+      return 'components[$i].component "$componentType" matches no anyOf branch (allowed: $allowed)';
+    }
+    final branchRequired = (match['required'] as List).cast<String>();
+    for (final key in branchRequired) {
+      if (!item.containsKey(key)) {
+        return 'components[$i] (component=$componentType): missing required key "$key"';
+      }
     }
   }
 
   return null; // valid
+}
+
+/// Recursively walks a JSON Schema map and yields every property descriptor
+/// (any sub-map with a `type` key). Used by regression tests that assert
+/// no unbounded numerics survive.
+Iterable<Map<String, dynamic>> _allTypedNodes(Object? node) sync* {
+  if (node is Map<String, dynamic>) {
+    if (node.containsKey('type')) yield node;
+    for (final v in node.values) {
+      yield* _allTypedNodes(v);
+    }
+  } else if (node is List) {
+    for (final v in node) {
+      yield* _allTypedNodes(v);
+    }
+  }
 }
 
 // ─── Test data ───────────────────────────────────────────────────────────────
@@ -279,11 +302,11 @@ void main() {
   // Schema tests
   // ─────────────────────────────────────────────────────────────────────────
 
-  group('a2uiOutcomeResponseSchema', () {
+  group('a2uiOutcomeJsonSchema', () {
     late Map<String, dynamic> schema;
 
     setUp(() {
-      schema = a2uiOutcomeResponseSchema();
+      schema = a2uiOutcomeJsonSchema();
     });
 
     test('schema has type object', () {
@@ -302,19 +325,36 @@ void main() {
       expect(enumValues, contains(kA2uiBasicCatalogId));
     });
 
-    test('components items require id and component', () {
+    test('components items use anyOf discriminated by component', () {
       final itemSchema = schema['properties']['updateComponents']['properties']
           ['components']['items'] as Map<String, dynamic>;
-      final required = (itemSchema['required'] as List).cast<String>();
-      expect(required, containsAll(['id', 'component']));
+      expect(itemSchema, contains('anyOf'));
+      final branches = (itemSchema['anyOf'] as List).cast<Map<String, dynamic>>();
+      expect(branches, isNotEmpty);
+      for (final b in branches) {
+        final required = (b['required'] as List).cast<String>();
+        expect(required, containsAll(['id', 'component']));
+      }
     });
 
-    test('component enum includes Column, Text, Button', () {
+    test('anyOf branches cover Column, Row, Text, Button, Icon, Card, Divider',
+        () {
       final itemSchema = schema['properties']['updateComponents']['properties']
           ['components']['items'] as Map<String, dynamic>;
-      final componentEnum =
-          (itemSchema['properties']['component']['enum'] as List).cast<String>();
-      expect(componentEnum, containsAll(['Column', 'Text', 'Button']));
+      final branches = (itemSchema['anyOf'] as List).cast<Map<String, dynamic>>();
+      final names = branches
+          .map((b) =>
+              ((b['properties'] as Map)['component']['enum'] as List).first
+                  as String)
+          .toSet();
+      expect(
+        names,
+        containsAll(['Column', 'Row', 'Text', 'Button', 'Icon', 'Card', 'Divider']),
+      );
+      // Image and List were schema-only in the legacy schema and forbidden
+      // in the prompt — they must NOT survive the migration.
+      expect(names, isNot(contains('Image')));
+      expect(names, isNot(contains('List')));
     });
 
     test('positive sample (Column + Text + Button) passes schema validation', () {
@@ -322,16 +362,10 @@ void main() {
       expect(error, isNull, reason: 'Expected no error, got: $error');
     });
 
-    test(
-        'negative sample with unknown component name fails schema validation',
+    test('negative sample with unknown component name fails schema validation',
         () {
-      final error =
-          _validateSchema(schema, _negativeSampleUnknownComponent());
-      expect(
-        error,
-        isNotNull,
-        reason: 'Expected a validation error for unknown component type',
-      );
+      final error = _validateSchema(schema, _negativeSampleUnknownComponent());
+      expect(error, isNotNull);
       expect(error, contains('MagicWidget'));
     });
 
@@ -342,9 +376,100 @@ void main() {
     });
 
     test('schema returns a new map instance on each call', () {
-      final s1 = a2uiOutcomeResponseSchema();
-      final s2 = a2uiOutcomeResponseSchema();
+      final s1 = a2uiOutcomeJsonSchema();
+      final s2 = a2uiOutcomeJsonSchema();
       expect(identical(s1, s2), isFalse);
+    });
+
+    // ── Regression guards for the gemini "infinite digit loop" bug ─────────
+
+    test('contains no unbounded number/integer types', () {
+      // Bug: Gemini's structured-output sampler enters an infinite digit loop
+      // on `{type: number}` properties without min/max bounds. Reproduced on
+      // gemini-2.5-flash and gemini-3-flash-preview, both locking on a
+      // `weight: 1000000…` token. The fix is to remove every unbounded
+      // numeric slot from the response schema; this test is the regression
+      // guard that future edits don't reintroduce one.
+      for (final node in _allTypedNodes(schema)) {
+        final type = node['type'];
+        if (type == 'number' || type == 'integer') {
+          final hasBounds = node.containsKey('minimum') ||
+              node.containsKey('maximum') ||
+              node.containsKey('enum');
+          expect(
+            hasBounds,
+            isTrue,
+            reason: 'Found unbounded $type slot: $node — Gemini is known to '
+                'lock into an infinite digit loop on these.',
+          );
+        }
+      }
+    });
+
+    test('uses only keywords supported by Gemini responseJsonSchema', () {
+      // Source: python-genai SDK, google/genai/types.py
+      // (GenerateContentConfig.response_json_schema docstring). Anything
+      // outside this allow-list triggers HTTP 400 INVALID_ARGUMENT from
+      // Gemini with no field-level detail — historically `maxLength` (which
+      // is widely supported in JSON Schema generally) tripped the entire
+      // request. New keywords must be added here only after confirming the
+      // SDK source still lists them as supported.
+      const supported = {
+        // Identity / referencing
+        r'$id', r'$defs', r'$ref', r'$anchor',
+        // Type / docs
+        'type', 'format', 'title', 'description',
+        // Enum (strings + numbers ONLY, never booleans)
+        'enum',
+        // Arrays
+        'items', 'prefixItems', 'minItems', 'maxItems',
+        // Numbers
+        'minimum', 'maximum',
+        // Composition
+        'anyOf', 'oneOf',
+        // Objects
+        'properties', 'additionalProperties', 'required',
+        // Non-standard but documented
+        'propertyOrdering',
+      };
+
+      void walk(Object? node, String path) {
+        if (node is Map<String, dynamic>) {
+          for (final key in node.keys) {
+            // Keys inside `properties: {...}` are user-defined property
+            // names, not schema keywords — skip them.
+            final isUnderProperties = path.endsWith('.properties');
+            if (!isUnderProperties && !supported.contains(key)) {
+              fail(
+                'Unsupported responseJsonSchema keyword "$key" at $path. '
+                'See google/genai/types.py for the supported set.',
+              );
+            }
+            walk(node[key], '$path.$key');
+          }
+        } else if (node is List) {
+          for (var i = 0; i < node.length; i++) {
+            walk(node[i], '$path[$i]');
+          }
+        }
+      }
+
+      walk(schema, r'$');
+    });
+
+    test('every object level closes additionalProperties', () {
+      // Without `additionalProperties: false` the model can invent fields,
+      // which is the second amplifier of the infinite-digit-loop bug (a
+      // hallucinated property gets a free pass through the validator).
+      for (final node in _allTypedNodes(schema)) {
+        if (node['type'] == 'object') {
+          expect(
+            node['additionalProperties'],
+            isFalse,
+            reason: 'Object schema is open-world — model can invent fields: $node',
+          );
+        }
+      }
     });
   });
 }

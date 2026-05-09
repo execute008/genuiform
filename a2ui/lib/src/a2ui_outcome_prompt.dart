@@ -1,20 +1,19 @@
-// Prompt template + Vertex `responseSchema` for asking Gemini to emit an
-// A2UI v0.9 outcome screen.
+// Prompt template + `responseJsonSchema` for emitting an A2UI v0.9 outcome
+// screen.
 //
 // ─── Schema approach ────────────────────────────────────────────────────────
 //
 // CHOSEN: a single JSON object with two required top-level keys —
 //   { "createSurface": { ... }, "updateComponents": { ... } }
 //
-// Vertex's structured-output validator does not reliably honour
-// `prefixItems` (the schema mechanism for an ordered tuple), so a
-// two-element array with discriminated union shapes is not viable.
-// `oneOf` over array items would also accept arrays in any order or with
-// any mix of message kinds, which defeats the purpose. The flat
-// two-property object is cleanly expressible and lets Vertex reason about
-// both halves coherently in a single call. The caller
-// ([A2uiOutcomeEmitter]) reconstructs the two A2UI wire envelopes by
-// wrapping each payload with `{"version":"v0.9", ...}`.
+// The structured-output validator does not reliably honour `prefixItems`
+// (the schema mechanism for an ordered tuple), so a two-element array with
+// discriminated union shapes is not viable. `oneOf` over array items would
+// also accept arrays in any order or with any mix of message kinds, which
+// defeats the purpose. The flat two-property object is cleanly expressible
+// and lets the model reason about both halves coherently in a single call.
+// The caller ([A2uiOutcomeSource]) reconstructs the two A2UI wire envelopes
+// by wrapping each payload with `{"version":"v0.9", ...}`.
 
 import 'simulated_handoff.dart';
 
@@ -24,7 +23,7 @@ const String kA2uiBasicCatalogId =
 
 /// Surface ID used for outcome screens.  Must be consistent across the
 /// `createSurface` and `updateComponents` messages emitted by
-/// [A2uiOutcomeEmitter].
+/// [A2uiOutcomeSource].
 const String kA2uiOutcomeSurfaceId = 'outcome_surface';
 
 /// Default action name carried by the in-Surface Restart Button.
@@ -34,12 +33,12 @@ const String kA2uiOutcomeSurfaceId = 'outcome_surface';
 /// handler stay in lockstep without per-consumer plumbing.
 const String kA2uiRestartAction = 'genuiform/restart';
 
-/// Builds the system prompt that instructs Vertex to emit A2UI v0.9 JSON
+/// Builds the system prompt that instructs the model to emit A2UI v0.9 JSON
 /// for the terminal outcome screen.
 ///
 /// The returned string is passed verbatim as `systemInstruction` to
 /// [LlmClient.generate]. It tells the model:
-/// - What JSON shape to produce (matching [a2uiOutcomeResponseSchema]).
+/// - What JSON shape to produce (matching [a2uiOutcomeJsonSchema]).
 /// - Which catalog to use and what components are allowed.
 /// - That the Button with id `restart_btn` must carry the
 ///   [kA2uiRestartAction] action so the handler can route it back.
@@ -160,79 +159,172 @@ Produce the JSON object now.
 ''';
 }
 
-/// Returns a Vertex AI `responseSchema` that constrains the model to emit
-/// the combined `createSurface` + `updateComponents` object described in
+/// Returns the JSON Schema that constrains the model response to the combined
+/// `createSurface` + `updateComponents` object described in
 /// [buildA2uiOutcomePrompt].
 ///
-/// `components` is intentionally permissive: each item is an object with a
-/// required `component` (one of the catalog enum values) and `id`, plus
-/// any of the basic catalog's properties. A strict `oneOf` discriminator
-/// over each component type is omitted because Vertex's schema validator
-/// does not reliably honour deep `oneOf` branches in array items.
-Map<String, dynamic> a2uiOutcomeResponseSchema() => {
-      'type': 'object',
-      'required': ['createSurface', 'updateComponents'],
-      'properties': {
-        'createSurface': {
-          'type': 'object',
-          'required': ['surfaceId', 'catalogId'],
-          'properties': {
-            'surfaceId': {'type': 'string'},
-            'catalogId': {
-              'type': 'string',
-              'enum': [kA2uiBasicCatalogId],
-            },
-            'sendDataModel': {'type': 'boolean'},
+/// See [GeminiA2uiOutcomeSource] for the rationale behind the schema design
+/// (discriminated-union branches, bounded properties, and the infinite-digit-
+/// loop history that motivated this approach).
+Map<String, dynamic> a2uiOutcomeJsonSchema() {
+  const justifyEnum = ['start', 'center', 'end', 'spaceBetween', 'stretch'];
+  const alignEnum = ['start', 'center', 'end', 'stretch'];
+  const textVariants = ['display', 'h1', 'h2', 'h3', 'body', 'label'];
+  const buttonVariants = ['primary', 'secondary', 'tertiary'];
+
+  // Plain string refs. We deliberately do NOT use `maxLength` even though
+  // it's tempting as a runaway-string guard: per the python-genai SDK
+  // source (google/genai/types.py, GenerateContentConfig.response_json_schema
+  // docstring), Gemini's `responseJsonSchema` does not honour `maxLength` —
+  // including it triggers HTTP 400 INVALID_ARGUMENT with no field-level
+  // detail. Bounded `maxItems` on parent arrays is our string-runaway guard.
+  final stringIdRef = {'type': 'string'};
+
+  Map<String, dynamic> branch({
+    required String componentName,
+    required Map<String, dynamic> properties,
+    required List<String> required,
+  }) =>
+      {
+        'type': 'object',
+        'additionalProperties': false,
+        'required': ['id', 'component', ...required],
+        'properties': {
+          'id': stringIdRef,
+          'component': {
+            'type': 'string',
+            'enum': [componentName],
           },
+          ...properties,
         },
-        'updateComponents': {
-          'type': 'object',
-          'required': ['surfaceId', 'components'],
-          'properties': {
-            'surfaceId': {'type': 'string'},
-            'components': {
-              'type': 'array',
-              'minItems': 1,
-              'items': {
-                'type': 'object',
-                'required': ['id', 'component'],
-                'properties': {
-                  'id': {'type': 'string'},
-                  'component': {
-                    'type': 'string',
-                    'enum': [
-                      'Column',
-                      'Row',
-                      'Text',
-                      'Button',
-                      'Icon',
-                      'Card',
-                      'Divider',
-                      'Image',
-                      'List',
-                    ],
+      };
+
+  return {
+    'type': 'object',
+    'additionalProperties': false,
+    'required': ['createSurface', 'updateComponents'],
+    'properties': {
+      'createSurface': {
+        'type': 'object',
+        'additionalProperties': false,
+        'required': ['surfaceId', 'catalogId'],
+        'properties': {
+          'surfaceId': {
+            'type': 'string',
+            'enum': [kA2uiOutcomeSurfaceId],
+          },
+          'catalogId': {
+            'type': 'string',
+            'enum': [kA2uiBasicCatalogId],
+          },
+          'sendDataModel': {'type': 'boolean'},
+        },
+      },
+      'updateComponents': {
+        'type': 'object',
+        'additionalProperties': false,
+        'required': ['surfaceId', 'components'],
+        'properties': {
+          'surfaceId': {
+            'type': 'string',
+            'enum': [kA2uiOutcomeSurfaceId],
+          },
+          'components': {
+            'type': 'array',
+            'minItems': 1,
+            'maxItems': 16,
+            'items': {
+              'anyOf': [
+                branch(
+                  componentName: 'Column',
+                  required: ['children'],
+                  properties: {
+                    'children': {
+                      'type': 'array',
+                      'minItems': 1,
+                      'maxItems': 12,
+                      'items': stringIdRef,
+                    },
+                    'justify': {'type': 'string', 'enum': justifyEnum},
+                    'align': {'type': 'string', 'enum': alignEnum},
                   },
-                  // Layout (Column / Row)
-                  'justify': {'type': 'string'},
-                  'align': {'type': 'string'},
-                  'children': {
-                    'type': 'array',
-                    'items': {'type': 'string'},
+                ),
+                branch(
+                  componentName: 'Row',
+                  required: ['children'],
+                  properties: {
+                    'children': {
+                      'type': 'array',
+                      'minItems': 1,
+                      'maxItems': 8,
+                      'items': stringIdRef,
+                    },
+                    'justify': {'type': 'string', 'enum': justifyEnum},
+                    'align': {'type': 'string', 'enum': alignEnum},
                   },
-                  // Text
-                  'text': {'type': 'string'},
-                  'variant': {'type': 'string'},
-                  // Button
-                  'child': {'type': 'string'},
-                  'action': {'type': 'object'},
-                  // Icon
-                  'name': {'type': 'string'},
-                  // Shared
-                  'weight': {'type': 'number'},
-                },
-              },
+                ),
+                branch(
+                  componentName: 'Text',
+                  required: ['text'],
+                  properties: {
+                    'text': {'type': 'string'},
+                    'variant': {'type': 'string', 'enum': textVariants},
+                  },
+                ),
+                branch(
+                  componentName: 'Button',
+                  required: ['child', 'action'],
+                  properties: {
+                    'child': stringIdRef,
+                    'variant': {'type': 'string', 'enum': buttonVariants},
+                    'action': {
+                      'type': 'object',
+                      'additionalProperties': false,
+                      'required': ['event'],
+                      'properties': {
+                        'event': {
+                          'type': 'object',
+                          'additionalProperties': false,
+                          'required': ['name'],
+                          'properties': {
+                            'name': {
+                              'type': 'string',
+                              'enum': [kA2uiRestartAction],
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                ),
+                branch(
+                  componentName: 'Icon',
+                  required: ['name'],
+                  properties: {
+                    'name': {'type': 'string'},
+                  },
+                ),
+                branch(
+                  componentName: 'Card',
+                  required: ['child'],
+                  properties: {
+                    'child': stringIdRef,
+                  },
+                ),
+                branch(
+                  componentName: 'Divider',
+                  required: const [],
+                  properties: const {},
+                ),
+              ],
             },
           },
         },
       },
-    };
+    },
+  };
+}
+
+/// Compatibility alias for [a2uiOutcomeJsonSchema].
+@Deprecated('Use a2uiOutcomeJsonSchema() instead')
+Map<String, dynamic> a2uiOutcomeResponseJsonSchema() => a2uiOutcomeJsonSchema();

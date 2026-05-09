@@ -34,15 +34,15 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  // Priority 1: compile-time --dart-define=GEMINI_API_KEY=xxx
+  // Compile-time --dart-define=GEMINI_API_KEY=xxx (free tier from
+  // aistudio.google.com/apikey). Vertex AI from a Flutter client must go
+  // through Firebase, not via a baked-in API key.
   static const _envApiKey = String.fromEnvironment('GEMINI_API_KEY');
-  static const _envProjectId = String.fromEnvironment('GEMINI_PROJECT_ID');
 
   late final ValueNotifier<String> _apiKey;
-  late final ValueNotifier<String> _projectId;
 
   /// Runtime toggle controlling whether terminal outcomes render via the
-  /// A2UI machinery (`A2uiOutcomeRenderer` streaming a Vertex-emitted A2UI
+  /// A2UI machinery (`A2uiOutcomeRenderer` streaming a Gemini-emitted A2UI
   /// tree, with hand-crafted fallback) or via a SnackBar.
   late final ValueNotifier<bool> _useA2ui;
 
@@ -52,29 +52,25 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _apiKey = ValueNotifier(_envApiKey);
-    _projectId = ValueNotifier(_envProjectId);
     _useA2ui = ValueNotifier(false);
   }
 
   @override
   void dispose() {
     _apiKey.dispose();
-    _projectId.dispose();
     _useA2ui.dispose();
     super.dispose();
   }
 
-  LlmClient _buildClient() => VertexDirectClient(
-        apiKey: _apiKey.value,
-        projectId: _projectId.value,
-        location: 'europe-west1',
-      );
+  LlmClient _buildClient() => GeminiApiClient(apiKey: _apiKey.value);
 
   /// Builds a fresh emitter scoped to one scenario run. The page disposes
   /// the loader's stream when it tears down; the emitter itself is
   /// stateless beyond the bound [LlmClient], so re-creation is cheap.
   A2uiOutcomeEmitter _buildEmitter(LlmClient client) =>
-      A2uiOutcomeEmitter(client: client, model: _model);
+      A2uiOutcomeEmitter(
+        source: GeminiA2uiOutcomeSource(client: client),
+      );
 
   void _openScenario({
     required String title,
@@ -113,25 +109,19 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('genuiform examples')),
       body: ListenableBuilder(
-        listenable: Listenable.merge([_apiKey, _projectId, _useA2ui]),
+        listenable: Listenable.merge([_apiKey, _useA2ui]),
         builder: (context, _) {
-          final hasKey =
-              _apiKey.value.isNotEmpty && _projectId.value.isNotEmpty;
+          final hasKey = _apiKey.value.isNotEmpty;
 
           return Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // ── API key inputs ──────────────────────────────────────────
+                // ── API key input ───────────────────────────────────────────
                 ApiKeyPanel(
                   notifier: _apiKey,
-                  label: 'Gemini API key / OAuth token',
-                ),
-                const SizedBox(height: 8),
-                ApiKeyPanel(
-                  notifier: _projectId,
-                  label: 'GCP Project ID',
+                  label: 'Gemini API key (AIza…)',
                 ),
                 const SizedBox(height: 16),
 
@@ -144,7 +134,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     subtitle: Text(
                       _useA2ui.value
                           ? 'Terminal outcomes render via flutter/genui '
-                              '(A2UI v0.9). Vertex emits the tree; falls '
+                              '(A2UI v0.9). Gemini emits the tree; falls '
                               'back to a hand-crafted tree on timeout/error.'
                           : 'Terminal outcomes show a SnackBar with the '
                               'handoff label (deterministic).',
@@ -188,7 +178,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 const SizedBox(height: 12),
 
-                // ── Demo 3 — Dev tools (works without a real Vertex key) ────
+                // ── Demo 3 — Dev tools (works without a real key) ───────────
                 FilledButton.icon(
                   onPressed: () => Navigator.of(context).push(
                     MaterialPageRoute<void>(
@@ -205,8 +195,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 if (!hasKey) ...[
                   const SizedBox(height: 16),
                   const Text(
-                    'Paste your Vertex AI access token + GCP project ID above '
-                    'to enable demos 1 and 2.',
+                    'Paste your Gemini API key (free tier from '
+                    'aistudio.google.com/apikey) above to enable demos 1 and 2.',
                     style: TextStyle(fontStyle: FontStyle.italic),
                   ),
                 ],
@@ -222,7 +212,7 @@ class _HomeScreenState extends State<HomeScreen> {
 // ── Dev tools demo screen ─────────────────────────────────────────────────────
 
 /// Demonstrates [OutcomeTreeView], [AnswerHistorySidebar], and [SplitUserDemo]
-/// using [FakeLlmClient] scripts — no real Vertex AI key required.
+/// using [FakeLlmClient] scripts — no real Gemini API key required.
 class _DevToolsDemoScreen extends StatefulWidget {
   const _DevToolsDemoScreen();
 

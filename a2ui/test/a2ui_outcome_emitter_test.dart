@@ -1,554 +1,109 @@
-// Tests for workbench/lib/src/llm/a2ui_outcome_emitter.dart
-//
-// Covers Phase 2 of the A2UI v2 spec (§4.2):
-//   1. Prompt + schema forwarded correctly to the underlying LlmClient.
-//   2. Valid Vertex response is split into two A2UI wire-format JSON strings.
-//   3. LlmClientError subtypes (auth, rate-limit, schema) propagate unchanged.
-//
-// Uses the library-provided [FakeLlmClient] from `package:genuiform/genuiform.dart`
-// so that there is no duplication of test infrastructure.
-
 // ignore_for_file: lines_longer_than_80_chars
 
-import 'dart:convert';
+import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:genuiform/genuiform.dart';
-
 import 'package:genuiform_a2ui/genuiform_a2ui.dart';
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ─── Test doubles ─────────────────────────────────────────────────────────────
 
-/// Minimal valid Vertex response payload: a single JSON object with both
-/// `createSurface` and `updateComponents` top-level keys.
-///
-/// Matches the schema produced by [a2uiOutcomeResponseJsonSchema].
-const String _kValidVertexResponse = '''
-{
-  "createSurface": {
-    "surfaceId": "outcome_surface",
-    "catalogId": "https://a2ui.org/specification/v0_9/basic_catalog.json",
-    "sendDataModel": false
-  },
-  "updateComponents": {
-    "surfaceId": "outcome_surface",
-    "components": [
-      {"id": "root", "component": "Column", "children": ["headline", "restart_btn"]},
-      {"id": "headline", "component": "Text", "text": "Book a call", "variant": "h2"},
-      {"id": "restart_label", "component": "Text", "text": "Restart form"},
-      {"id": "restart_btn", "component": "Button", "child": "restart_label",
-       "variant": "primary", "action": {"event": {"name": "genuiform/restart"}}}
-    ]
-  }
-}
-''';
+class _RecordingSource implements A2uiOutcomeSource {
+  final List<_SourceCall> calls = [];
+  final List<String> _responses;
 
-/// A [FakeLlmClient] that throws the supplied error on `generate()`.
-///
-/// We can't configure [FakeLlmClient] to throw errors (it only emits values),
-/// so we create a minimal subclass for the error-propagation tests.
-class _ErrorLlmClient extends LlmClient {
-  _ErrorLlmClient(this._error);
-
-  final LlmClientError _error;
+  _RecordingSource({List<String> responses = const []})
+      : _responses = responses;
 
   @override
-  Stream<String> generate({
-    required String systemPrompt,
-    required List<Message> messages,
-    Map<String, dynamic>? responseSchema,
-    Map<String, dynamic>? responseJsonSchema,
-    required String model,
-    double temperature = 0.7,
+  Stream<String> emit({
+    required String outcomeId,
+    required SimulatedHandoff? handoff,
+    required String summary,
+    void Function()? onDelta,
   }) {
-    return Stream.error(_error);
+    calls.add(_SourceCall(outcomeId: outcomeId, handoff: handoff, summary: summary));
+    return Stream.fromIterable(_responses);
   }
 }
 
-/// An [LlmClient] that yields a fixed list of [_deltas] in order, simulating
-/// the post-streaming-refactor [GeminiApiClient]/[VertexProxyClient] contract
-/// where multiple deltas arrive over the lifetime of a single generate() call.
-class _StreamingLlmClient extends LlmClient {
-  _StreamingLlmClient(this._deltas);
-
-  final List<String> _deltas;
+class _ErrorSource implements A2uiOutcomeSource {
+  _ErrorSource(this._error);
+  final Object _error;
 
   @override
-  Stream<String> generate({
-    required String systemPrompt,
-    required List<Message> messages,
-    Map<String, dynamic>? responseSchema,
-    Map<String, dynamic>? responseJsonSchema,
-    required String model,
-    double temperature = 0.7,
-  }) {
-    return Stream<String>.fromIterable(_deltas);
-  }
+  Stream<String> emit({
+    required String outcomeId,
+    required SimulatedHandoff? handoff,
+    required String summary,
+    void Function()? onDelta,
+  }) =>
+      Stream.error(_error);
+}
+
+class _SourceCall {
+  final String outcomeId;
+  final SimulatedHandoff? handoff;
+  final String summary;
+
+  const _SourceCall({required this.outcomeId, required this.handoff, required this.summary});
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 void main() {
-  group('A2uiOutcomeEmitter', () {
-    // ── Test 1: prompt + schema forwarded correctly ───────────────────────────
-    group('forwards prompt and schema to LlmClient.generate', () {
-      test('systemPrompt contains the outcome id', () async {
-        final fake = FakeLlmClient(
-          scriptedResponses: [_kValidVertexResponse],
-        );
-        final emitter = A2uiOutcomeEmitter(client: fake);
+  group('A2uiOutcomeEmitter (delegation layer)', () {
+    test('forwards outcomeId, handoff, and summary to the source', () async {
+      const handoff = SimulatedHandoff(label: 'Book a call', icon: 'calendar');
+      final source = _RecordingSource(responses: ['chunk1', 'chunk2']);
+      final emitter = A2uiOutcomeEmitter(source: source);
 
-        await emitter
-            .emit(
-              outcomeId: 'book_call',
-              handoff: null,
-              summary: 'Test summary.',
-            )
-            .toList(); // drain the stream
+      await emitter
+          .emit(outcomeId: 'book_call', handoff: handoff, summary: 'summary text')
+          .toList();
 
-        expect(fake.invocations, hasLength(1));
-        final inv = fake.invocations.first;
-        expect(inv.systemPrompt, contains('book_call'));
-      });
-
-      test('systemPrompt contains the handoff label when provided', () async {
-        const handoff = SimulatedHandoff(label: 'Book a call', icon: 'calendar');
-        final fake = FakeLlmClient(
-          scriptedResponses: [_kValidVertexResponse],
-        );
-        final emitter = A2uiOutcomeEmitter(client: fake);
-
-        await emitter
-            .emit(
-              outcomeId: 'book_call',
-              handoff: handoff,
-              summary: 'Qualified lead.',
-            )
-            .toList();
-
-        final inv = fake.invocations.first;
-        expect(inv.systemPrompt, contains('Book a call'));
-        expect(inv.systemPrompt, contains('book_call'));
-      });
-
-      test('uses responseJsonSchema (not legacy responseSchema)', () async {
-        final fake = FakeLlmClient(
-          scriptedResponses: [_kValidVertexResponse],
-        );
-        final emitter = A2uiOutcomeEmitter(client: fake);
-
-        await emitter
-            .emit(outcomeId: 'x', handoff: null, summary: '')
-            .toList();
-
-        final inv = fake.invocations.first;
-        // The emitter must use the newer `responseJsonSchema` field, which
-        // accepts oneOf and additionalProperties — needed to express the
-        // discriminated component union without unbounded slots.
-        expect(inv.responseSchema, isNull);
-        expect(inv.responseJsonSchema, isNotNull);
-        expect(
-          jsonEncode(inv.responseJsonSchema),
-          equals(jsonEncode(a2uiOutcomeResponseJsonSchema())),
-        );
-      });
-
-      test('model defaults to gemini-2.5-flash', () async {
-        final fake = FakeLlmClient(
-          scriptedResponses: [_kValidVertexResponse],
-        );
-        final emitter = A2uiOutcomeEmitter(client: fake);
-
-        await emitter
-            .emit(outcomeId: 'x', handoff: null, summary: '')
-            .toList();
-
-        expect(fake.invocations.first.model, equals('gemini-2.5-flash'));
-      });
-
-      test('custom model is forwarded', () async {
-        final fake = FakeLlmClient(
-          scriptedResponses: [_kValidVertexResponse],
-        );
-        final emitter = A2uiOutcomeEmitter(
-          client: fake,
-          model: 'gemini-2.0-pro',
-        );
-
-        await emitter
-            .emit(outcomeId: 'x', handoff: null, summary: '')
-            .toList();
-
-        expect(fake.invocations.first.model, equals('gemini-2.0-pro'));
-      });
-
-      test('temperature defaults to 0.7', () async {
-        final fake = FakeLlmClient(
-          scriptedResponses: [_kValidVertexResponse],
-        );
-        final emitter = A2uiOutcomeEmitter(client: fake);
-
-        await emitter
-            .emit(outcomeId: 'x', handoff: null, summary: '')
-            .toList();
-
-        expect(fake.invocations.first.temperature, equals(0.7));
-      });
-
-      test('custom temperature is forwarded to LlmClient.generate', () async {
-        final fake = FakeLlmClient(
-          scriptedResponses: [_kValidVertexResponse],
-        );
-        final emitter = A2uiOutcomeEmitter(
-          client: fake,
-          temperature: 0.2,
-        );
-
-        await emitter
-            .emit(outcomeId: 'x', handoff: null, summary: '')
-            .toList();
-
-        expect(fake.invocations.first.temperature, equals(0.2));
-      });
-
-      // Regression: workbench (and example) used to wire the toolbar model
-      // picker straight into the A2UI emitter. The default picker value is
-      // `gemini-flash-latest`, which currently routes to the gemini-3 preview
-      // line — and that variant rejects `generationConfig.responseJsonSchema`
-      // on AI Studio v1beta with a generic HTTP 400 INVALID_ARGUMENT. Symptom
-      // was "A2uiOutcomeRenderer: stream error — falling back to v1 tree.
-      // SchemaError: Gemini API rejected request (HTTP 400)". The form path
-      // was unaffected because it uses the legacy `responseSchema` field.
-      //
-      // Reject `-latest` aliases at construction so the misuse is loud and
-      // immediate instead of surfacing as a confusing 400 mid-flow.
-      test('rejects -latest model aliases that do not support responseJsonSchema',
-          () {
-        final fake = FakeLlmClient(scriptedResponses: [_kValidVertexResponse]);
-
-        expect(
-          () => A2uiOutcomeEmitter(client: fake, model: 'gemini-flash-latest'),
-          throwsA(
-            isA<ArgumentError>().having(
-              (e) => e.toString(),
-              'message',
-              contains('responseJsonSchema'),
-            ),
-          ),
-        );
-        expect(
-          () => A2uiOutcomeEmitter(
-            client: fake,
-            model: 'gemini-flash-lite-latest',
-          ),
-          throwsA(isA<ArgumentError>()),
-        );
-        expect(
-          () => A2uiOutcomeEmitter(client: fake, model: 'gemini-pro-latest'),
-          throwsA(isA<ArgumentError>()),
-        );
-      });
+      expect(source.calls, hasLength(1));
+      final call = source.calls.first;
+      expect(call.outcomeId, equals('book_call'));
+      expect(call.handoff, equals(handoff));
+      expect(call.summary, equals('summary text'));
     });
 
-    // ── Test 2: correct wire-format chunks are yielded ────────────────────────
-    group('yields A2UI wire-format JSON strings', () {
-      test('emits exactly two chunks for a valid response', () async {
-        final fake = FakeLlmClient(
-          scriptedResponses: [_kValidVertexResponse],
-        );
-        final emitter = A2uiOutcomeEmitter(client: fake);
+    test('yields all chunks from the source in order', () async {
+      final source = _RecordingSource(responses: ['a', 'b', 'c']);
+      final emitter = A2uiOutcomeEmitter(source: source);
 
-        final chunks = await emitter
-            .emit(outcomeId: 'book_call', handoff: null, summary: 'summary')
-            .toList();
+      final chunks = await emitter
+          .emit(outcomeId: 'x', handoff: null, summary: '')
+          .toList();
 
-        expect(chunks, hasLength(2));
-      });
-
-      test('first chunk is a createSurface envelope with version v0.9', () async {
-        final fake = FakeLlmClient(
-          scriptedResponses: [_kValidVertexResponse],
-        );
-        final emitter = A2uiOutcomeEmitter(client: fake);
-
-        final chunks = await emitter
-            .emit(outcomeId: 'book_call', handoff: null, summary: 'summary')
-            .toList();
-
-        final first = jsonDecode(chunks[0]) as Map<String, dynamic>;
-        expect(first['version'], equals('v0.9'));
-        expect(first, contains('createSurface'));
-        expect(first, isNot(contains('updateComponents')));
-      });
-
-      test(
-          'second chunk is an updateComponents envelope with version v0.9',
-          () async {
-        final fake = FakeLlmClient(
-          scriptedResponses: [_kValidVertexResponse],
-        );
-        final emitter = A2uiOutcomeEmitter(client: fake);
-
-        final chunks = await emitter
-            .emit(outcomeId: 'book_call', handoff: null, summary: 'summary')
-            .toList();
-
-        final second = jsonDecode(chunks[1]) as Map<String, dynamic>;
-        expect(second['version'], equals('v0.9'));
-        expect(second, contains('updateComponents'));
-        expect(second, isNot(contains('createSurface')));
-      });
-
-      test('createSurface payload matches the Vertex response payload',
-          () async {
-        final fake = FakeLlmClient(
-          scriptedResponses: [_kValidVertexResponse],
-        );
-        final emitter = A2uiOutcomeEmitter(client: fake);
-
-        final chunks = await emitter
-            .emit(outcomeId: 'book_call', handoff: null, summary: 'summary')
-            .toList();
-
-        final first = jsonDecode(chunks[0]) as Map<String, dynamic>;
-        final cs = first['createSurface'] as Map<String, dynamic>;
-        expect(cs['surfaceId'], equals('outcome_surface'));
-        expect(
-          cs['catalogId'],
-          equals('https://a2ui.org/specification/v0_9/basic_catalog.json'),
-        );
-      });
-
-      test('updateComponents payload contains the components from the response',
-          () async {
-        final fake = FakeLlmClient(
-          scriptedResponses: [_kValidVertexResponse],
-        );
-        final emitter = A2uiOutcomeEmitter(client: fake);
-
-        final chunks = await emitter
-            .emit(outcomeId: 'book_call', handoff: null, summary: 'summary')
-            .toList();
-
-        final second = jsonDecode(chunks[1]) as Map<String, dynamic>;
-        final uc = second['updateComponents'] as Map<String, dynamic>;
-        expect(uc['surfaceId'], equals('outcome_surface'));
-        final components = uc['components'] as List<dynamic>;
-        expect(components, hasLength(4));
-        final ids = components.map((c) => (c as Map)['id']).toList();
-        expect(ids, containsAll(['root', 'headline', 'restart_btn']));
-      });
+      expect(chunks, equals(['a', 'b', 'c']));
     });
 
-    // ── Test 3: LlmClientError subtypes propagate unchanged ──────────────────
-    group('propagates LlmClientError subtypes without swallowing', () {
-      test('AuthError propagates', () async {
-        const error = AuthError('Invalid API key');
-        final client = _ErrorLlmClient(error);
-        final emitter = A2uiOutcomeEmitter(client: client);
+    test('propagates errors from the source unchanged', () async {
+      const error = SchemaError('boom');
+      final source = _ErrorSource(error);
+      final emitter = A2uiOutcomeEmitter(source: source);
 
-        await expectLater(
-          emitter.emit(outcomeId: 'x', handoff: null, summary: ''),
-          emitsError(isA<AuthError>()),
-        );
-      });
+      Object? caught;
+      try {
+        await emitter.emit(outcomeId: 'x', handoff: null, summary: '').toList();
+      } catch (e) {
+        caught = e;
+      }
 
-      test('RateLimitError propagates', () async {
-        const error = RateLimitError('Quota exceeded');
-        final client = _ErrorLlmClient(error);
-        final emitter = A2uiOutcomeEmitter(client: client);
-
-        await expectLater(
-          emitter.emit(outcomeId: 'x', handoff: null, summary: ''),
-          emitsError(isA<RateLimitError>()),
-        );
-      });
-
-      test('SchemaError propagates', () async {
-        const error = SchemaError('Response does not match schema');
-        final client = _ErrorLlmClient(error);
-        final emitter = A2uiOutcomeEmitter(client: client);
-
-        await expectLater(
-          emitter.emit(outcomeId: 'x', handoff: null, summary: ''),
-          emitsError(isA<SchemaError>()),
-        );
-      });
-
-      test('NetworkError propagates', () async {
-        const error = NetworkError('Connection refused');
-        final client = _ErrorLlmClient(error);
-        final emitter = A2uiOutcomeEmitter(client: client);
-
-        await expectLater(
-          emitter.emit(outcomeId: 'x', handoff: null, summary: ''),
-          emitsError(isA<NetworkError>()),
-        );
-      });
-
-      test('preserved error is identical instance (not wrapped)', () async {
-        const original = AuthError('token expired');
-        final client = _ErrorLlmClient(original);
-        final emitter = A2uiOutcomeEmitter(client: client);
-
-        Object? caught;
-        try {
-          await emitter.emit(outcomeId: 'x', handoff: null, summary: '').toList();
-        } catch (e) {
-          caught = e;
-        }
-
-        // The same object should propagate — no wrapping.
-        expect(identical(caught, original), isTrue);
-      });
+      expect(identical(caught, error), isTrue);
     });
 
-    // ── Streaming: multiple deltas from upstream ─────────────────────────────
-    group('accumulates deltas from a streaming LlmClient', () {
-      test('yields exactly two envelopes when the response arrives as N deltas',
-          () async {
-        // Slice the valid response into 4 roughly-equal chunks to simulate
-        // SSE deltas arriving over time. The emitter must accumulate them
-        // before parsing.
-        final full = _kValidVertexResponse;
-        final chunkSize = (full.length / 4).ceil();
-        final deltas = <String>[
-          for (int i = 0; i < full.length; i += chunkSize)
-            full.substring(i, (i + chunkSize).clamp(0, full.length)),
-        ];
-        expect(deltas.length, greaterThan(1),
-            reason: 'Test must exercise multi-delta path');
-        expect(deltas.join(), equals(full),
-            reason: 'Deltas must concatenate back to the full payload');
+    test('empty response from source yields empty stream', () async {
+      final source = _RecordingSource();
+      final emitter = A2uiOutcomeEmitter(source: source);
 
-        final client = _StreamingLlmClient(deltas);
-        final emitter = A2uiOutcomeEmitter(client: client);
+      final chunks = await emitter
+          .emit(outcomeId: 'x', handoff: null, summary: '')
+          .toList();
 
-        final chunks = await emitter
-            .emit(outcomeId: 'book_call', handoff: null, summary: 's')
-            .toList();
-
-        expect(chunks, hasLength(2));
-        final first = jsonDecode(chunks[0]) as Map<String, dynamic>;
-        final second = jsonDecode(chunks[1]) as Map<String, dynamic>;
-        expect(first, contains('createSurface'));
-        expect(second, contains('updateComponents'));
-      });
-
-      test('does not throw on partial-JSON intermediate deltas', () async {
-        // Each individual delta is invalid JSON on its own; only the
-        // concatenation parses. The current per-chunk-jsonDecode emitter
-        // throws SchemaError on the very first delta.
-        final deltas = ['{"createSur', 'face":{"surfaceId":"s","catalogId":"c","sendDataModel":false},'
-            '"updateComponents":{"surfaceId":"s","components":[]}}'];
-        final client = _StreamingLlmClient(deltas);
-        final emitter = A2uiOutcomeEmitter(client: client);
-
-        final chunks = await emitter
-            .emit(outcomeId: 'x', handoff: null, summary: '')
-            .toList();
-
-        expect(chunks, hasLength(2));
-      });
-    });
-
-    // ── Runaway upstream guard ────────────────────────────────────────────────
-    //
-    // Regression: gemini-3-flash-preview occasionally goes degenerate and
-    // streams the same digit forever inside a numeric literal (e.g.
-    // `"weight":1.01121111…`). The buffer-then-parse emitter has no notion of
-    // "this stream is producing garbage" so it accumulates indefinitely and
-    // the loader's first-chunk timer fires with a misleading "first chunk did
-    // not arrive within Ns" message. The cap turns that into an accurate
-    // SchemaError originating at the emitter, and bounds memory.
-    group('runaway upstream guard', () {
-      test('throws SchemaError once buffered text exceeds maxBufferBytes',
-          () async {
-        // 32 deltas × 1024 chars = 32 KB > 16 KB cap.
-        final delta = '1' * 1024;
-        final client = _StreamingLlmClient(List<String>.filled(32, delta));
-        final emitter = A2uiOutcomeEmitter(
-          client: client,
-          maxBufferBytes: 16 * 1024,
-        );
-
-        Object? caught;
-        try {
-          await emitter
-              .emit(outcomeId: 'x', handoff: null, summary: '')
-              .toList();
-        } catch (e) {
-          caught = e;
-        }
-
-        expect(caught, isA<SchemaError>());
-        expect(
-          (caught as SchemaError).toString(),
-          contains('exceeded'),
-          reason: 'Error must name the real cause (runaway upstream), not a '
-              'misleading downstream symptom.',
-        );
-      });
-
-      test('does not throw when buffered text stays within maxBufferBytes',
-          () async {
-        // The valid response is well under 16 KB.
-        final fake = FakeLlmClient(
-          scriptedResponses: [_kValidVertexResponse],
-        );
-        final emitter = A2uiOutcomeEmitter(
-          client: fake,
-          maxBufferBytes: 16 * 1024,
-        );
-
-        final chunks = await emitter
-            .emit(outcomeId: 'x', handoff: null, summary: '')
-            .toList();
-
-        expect(chunks, hasLength(2));
-      });
-
-      test('default maxBufferBytes is generous enough for normal envelopes',
-          () async {
-        // Normal A2UI envelopes are 5–20 KB. The default must clear that with
-        // headroom; 64 KB minimum is the contract.
-        final emitter = A2uiOutcomeEmitter(
-          client: _ErrorLlmClient(const SchemaError('unused')),
-        );
-        expect(
-          emitter.maxBufferBytes,
-          greaterThanOrEqualTo(64 * 1024),
-        );
-      });
-    });
-
-    // ── Edge case: invalid JSON from client ───────────────────────────────────
-    group('handles unexpected client responses', () {
-      test('throws SchemaError when client emits non-JSON', () async {
-        final fake = FakeLlmClient(
-          scriptedResponses: ['this is not json'],
-        );
-        final emitter = A2uiOutcomeEmitter(client: fake);
-
-        await expectLater(
-          emitter.emit(outcomeId: 'x', handoff: null, summary: ''),
-          emitsError(isA<SchemaError>()),
-        );
-      });
-
-      test(
-          'throws SchemaError when response JSON is missing createSurface key',
-          () async {
-        final fake = FakeLlmClient(
-          scriptedResponses: ['{"updateComponents": {"surfaceId": "s", "components": []}}'],
-        );
-        final emitter = A2uiOutcomeEmitter(client: fake);
-
-        await expectLater(
-          emitter.emit(outcomeId: 'x', handoff: null, summary: ''),
-          emitsError(isA<SchemaError>()),
-        );
-      });
+      expect(chunks, isEmpty);
     });
   });
 }
