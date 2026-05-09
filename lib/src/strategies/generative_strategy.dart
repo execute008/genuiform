@@ -307,11 +307,24 @@ class GenerativeStrategy extends Strategy {
     return null;
   }
 
-  /// Finds the [Outcome] node with [id] in the tree rooted at [root].
+  /// Finds the terminal node for `complete`'s `outcome_id`.
+  ///
+  /// Matches an [Outcome] first; if none exists, accepts a [Layer] (graceful
+  /// exit point per spec §6.2) by promoting it to a synthetic [Outcome] that
+  /// carries the Layer's id, contractDelta, and handoff.
   Outcome? _findOutcome(OutcomeNode root, String? id) {
     if (id == null) return null;
+    Layer? layerMatch;
     for (final node in root.descendants()) {
       if (node is Outcome && node.id == id) return node;
+      if (node is Layer && node.id == id) layerMatch = node;
+    }
+    if (layerMatch != null) {
+      return Outcome(
+        id: layerMatch.id,
+        contractDelta: layerMatch.contractDelta,
+        handoff: layerMatch.handoff,
+      );
     }
     return null;
   }
