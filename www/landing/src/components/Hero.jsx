@@ -5,9 +5,6 @@ export default function Hero() {
     <section className="hero">
       <div className="hero-glow"></div>
       <div className="hero-content reveal">
-        <div className="hero-pill">
-          Open source for Flutter
-        </div>
         <h1>
           Forms that <span className="accent">read the room</span>.
         </h1>
