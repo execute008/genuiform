@@ -24,14 +24,13 @@ class WorkbenchController extends ChangeNotifier {
   
   // DSL Editor state
   bool _showDslEditor = false;
-  String _currentScenarioId = 'lead_qualification';
-  late String _dsl;
+  String _currentScenarioId = kScenarios.first.id;
+  String _dsl = kScenarios.first.dsl;
   late ParseResult _parseResult;
   late ParseResult _committedParseResult;
   int _formKey = 0;
   Timer? _debounce;
   Timer? _commitDebounce;
-  // String _lastSyncedDsl = '';  // Removed unused field
 
   // Agent chat state
   bool _chatOpen = false;
@@ -44,17 +43,22 @@ class WorkbenchController extends ChangeNotifier {
   static const _useMock = bool.fromEnvironment('USE_MOCK');
   static const _initialModel = 'gemini-flash-latest';
 
-  late final ValueNotifier<String> _geminiKey;
-  late final ValueNotifier<String> _model;
-  late final ValueNotifier<double> _temperature;
+  final ValueNotifier<String> _geminiKey = ValueNotifier(_envGeminiKey);
+  final ValueNotifier<String> _model = ValueNotifier(_initialModel);
+  final ValueNotifier<double> _temperature = ValueNotifier(0.7);
   final ValueNotifier<bool> _mascotEnabled = ValueNotifier<bool>(true);
 
   // Form controller reference for progress drawer
   final ValueNotifier<FormController?> controllerRef = ValueNotifier<FormController?>(null);
-  
+
   static const Duration _kCommitDebounce = Duration(milliseconds: 2000);
-  
+
   final GeminiService _geminiService = GeminiService();
+
+  WorkbenchController() {
+    _parseResult = parseDsl(_dsl);
+    _committedParseResult = _parseResult;
+  }
 
   final List<ChatMessage> _history = [
     const ChatMessage(
@@ -144,20 +148,7 @@ class WorkbenchController extends ChangeNotifier {
   void refresh() => notifyListeners();
 
   Future<void> init() async {
-    // Initialize synchronously before any await so late fields are ready for
-    // the first build() frame (which fires before the async SharedPreferences
-    // read in _geminiService.init() completes).
-    _geminiKey = ValueNotifier(_envGeminiKey);
-    _model = ValueNotifier(_initialModel);
-    _temperature = ValueNotifier(0.7);
-    _dsl = kScenarios.first.dsl;
-    _currentScenarioId = kScenarios.first.id;
-    _parseResult = parseDsl(_dsl);
-    _committedParseResult = _parseResult;
-
     await _geminiService.init();
-
-    notifyListeners();
   }
 
   void setScenarioKey(String key) {

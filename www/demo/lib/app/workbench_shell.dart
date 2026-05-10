@@ -29,8 +29,11 @@ class _WorkbenchShellState extends State<WorkbenchShell> {
   @override
   void initState() {
     super.initState();
-    _controller.init();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    _controller.init().then((_) {
+      if (!mounted) return;
+      // Force rebuild so API key button reflects the loaded key state, then
+      // show the dialog only if no key was found in storage.
+      setState(() {});
       if (!_controller.geminiService.hasApiKey) {
         _showApiKeyDialog();
       }
