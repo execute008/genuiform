@@ -11,6 +11,7 @@ import '../src/parser/parse_dsl.dart';
 import '../src/editor/progress_drawer.dart';
 import '../src/preview/form_preview.dart';
 import '../src/scenarios/scenarios.dart';
+import '../widgets/agent_chat_panel.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
 class WorkbenchShell extends StatefulWidget {
@@ -45,7 +46,7 @@ class _WorkbenchShellState extends State<WorkbenchShell> {
     );
     if (result != null) {
       await _controller.geminiService.setApiKey(result);
-      _controller.notifyListeners();
+      _controller.refresh();
     }
   }
 
@@ -145,6 +146,16 @@ class _WorkbenchShellState extends State<WorkbenchShell> {
                       return Row(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
+                          // Chat panel (wide only)
+                          if (_controller.chatOpen) ...[
+                            SizedBox(
+                              width: 320,
+                              child: AgentChatPanel(
+                                  controller: _controller),
+                            ),
+                            VerticalDivider(
+                                color: cs.outlineVariant, width: 1),
+                          ],
                           // Left column: editor panel
                           SizedBox(
                             width: constraints.maxWidth * 0.38,
@@ -220,6 +231,39 @@ class _TopBar extends StatelessWidget {
           const SizedBox(width: AppSpacing.s4),
 
           const Spacer(),
+          AnimatedBuilder(
+            animation: controller,
+            builder: (context, _) {
+              final wide =
+                  MediaQuery.of(context).size.width >= 860;
+              return IconButton(
+                tooltip: controller.chatOpen
+                    ? 'Hide agent chat'
+                    : 'DSL agent chat',
+                isSelected: controller.chatOpen,
+                onPressed: () {
+                  if (wide) {
+                    controller.toggleChat();
+                  } else {
+                    showModalBottomSheet<void>(
+                      context: context,
+                      isScrollControlled: true,
+                      builder: (ctx) => SizedBox(
+                        height:
+                            MediaQuery.of(ctx).size.height * 0.75,
+                        child: AgentChatPanel(
+                            controller: controller),
+                      ),
+                    );
+                  }
+                },
+                icon: const Icon(Icons.smart_toy_outlined, size: 18),
+                selectedIcon:
+                    const Icon(Icons.smart_toy, size: 18),
+              );
+            },
+          ),
+          const SizedBox(width: AppSpacing.s2),
           _TemperatureSlider(notifier: controller.temperature),
           const SizedBox(width: AppSpacing.s3),
           IconButton(
@@ -228,7 +272,11 @@ class _TopBar extends StatelessWidget {
               showModalBottomSheet(
                 context: context,
                 isScrollControlled: true,
-                builder: (context) => Container(
+                shape: const RoundedRectangleBorder(
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+                ),
+                clipBehavior: Clip.antiAlias,
+                builder: (context) => SizedBox(
                   height: MediaQuery.of(context).size.height * 0.75,
                   child: ProgressDrawer(
                     controllerRef: controller.controllerRef,

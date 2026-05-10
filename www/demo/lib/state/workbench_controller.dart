@@ -6,6 +6,8 @@ import '../models/chat_message.dart';
 import '../models/persona.dart';
 import '../models/scenario.dart' as DemoScenario;
 import '../services/gemini_service.dart';
+import '../src/agent/agent_message.dart';
+import '../src/agent/dsl_agent_service.dart';
 import '../src/parser/parse_dsl.dart';
 import '../src/llm/workbench_mock_llm_client.dart';
 import '../src/scenarios/scenarios.dart';
@@ -30,7 +32,13 @@ class WorkbenchController extends ChangeNotifier {
   Timer? _debounce;
   Timer? _commitDebounce;
   // String _lastSyncedDsl = '';  // Removed unused field
-  
+
+  // Agent chat state
+  bool _chatOpen = false;
+  final List<AgentMessage> _agentHistory = [];
+  bool _agentStreaming = false;
+  DslAgentService? _agentService;
+
   // LLM Client configuration
   static const _envGeminiKey = String.fromEnvironment('GEMINI_API_KEY');
   static const _useMock = bool.fromEnvironment('USE_MOCK');
@@ -76,6 +84,11 @@ class WorkbenchController extends ChangeNotifier {
   ValueNotifier<double> get temperature => _temperature;
   
   bool get hasGemini => _geminiKey.value.isNotEmpty || _geminiService.hasApiKey;
+
+  // Agent chat getters
+  bool get chatOpen => _chatOpen;
+  List<AgentMessage> get agentHistory => List.unmodifiable(_agentHistory);
+  bool get agentStreaming => _agentStreaming;
   
   static const candidateModels = <String>[
     'gemini-flash-latest',
@@ -309,6 +322,70 @@ class WorkbenchController extends ChangeNotifier {
     notifyListeners();
   }
   
+  // Agent chat methods
+  void toggleChat() {
+    _chatOpen = !_chatOpen;
+    notifyListeners();
+  }
+
+  void resetAgentChat() {
+    _agentService?.reset();
+    _agentHistory.clear();
+    notifyListeners();
+  }
+
+  Future<void> sendToAgent(String message) async {
+    if (_agentStreaming || message.trim().isEmpty) return;
+
+    // Lazily init agent service
+    if (_agentService == null) {
+      final key = _geminiService.apiKey ?? '';
+      if (key.isEmpty) return;
+      _agentService = DslAgentService(apiKey: key);
+      _agentService!.init();
+    }
+
+    _agentHistory.add(AgentMessage(role: AgentRole.user, text: message.trim()));
+    _agentHistory.add(
+        const AgentMessage(role: AgentRole.agent, text: '', isStreaming: true));
+    _agentStreaming = true;
+    notifyListeners();
+
+    final buffer = StringBuffer();
+    try {
+      await for (final chunk in _agentService!.send(message, currentDsl: _dsl)) {
+        buffer.write(chunk);
+        _agentHistory[_agentHistory.length - 1] = AgentMessage(
+          role: AgentRole.agent,
+          text: buffer.toString(),
+          isStreaming: true,
+        );
+        notifyListeners();
+      }
+    } catch (e) {
+      buffer.write('\n\n[Error: ${e.toString()}]');
+    }
+
+    _agentHistory[_agentHistory.length - 1] = AgentMessage(
+      role: AgentRole.agent,
+      text: buffer.toString(),
+      isStreaming: false,
+    );
+    _agentStreaming = false;
+    notifyListeners();
+  }
+
+  void applyAgentDsl(String dsl) {
+    _dsl = dsl;
+    _debounce?.cancel();
+    _commitDebounce?.cancel();
+    final result = parseDsl(_dsl);
+    _parseResult = result;
+    _committedParseResult = result;
+    _formKey++;
+    notifyListeners();
+  }
+
   LlmClient buildClient() {
     if (_useMock) return WorkbenchMockLlmClient();
     final key = _geminiKey.value.isNotEmpty
@@ -324,6 +401,7 @@ class WorkbenchController extends ChangeNotifier {
     _geminiKey.dispose();
     _model.dispose();
     _temperature.dispose();
+    _agentService = null;
     super.dispose();
   }
 }
