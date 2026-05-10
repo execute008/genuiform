@@ -135,6 +135,17 @@ class FormController {
       step.id: value,
     };
 
+    // When the user accepts a consent gate, record the topic in __consents so
+    // ConstraintEnforcer._checkRequireConsent considers it acknowledged.
+    if (step.id.startsWith('__consent_')) {
+      final topic = step.id.substring('__consent_'.length);
+      final existing = _session.answers['__consents'];
+      updatedAnswers['__consents'] = [
+        if (existing is List) ...existing.cast<String>(),
+        topic,
+      ];
+    }
+
     _session = _session.copyWith(
       history: updatedHistory,
       answers: updatedAnswers,
