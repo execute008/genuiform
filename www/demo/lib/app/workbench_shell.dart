@@ -6,10 +6,11 @@ import '../state/workbench_controller.dart';
 import '../theme/app_spacing.dart';
 import '../widgets/api_key_dialog.dart';
 import '../src/editor/code_editor.dart';
+import '../src/editor/legend_drawer.dart';
+import '../src/parser/parse_dsl.dart';
 import '../src/editor/progress_drawer.dart';
 import '../src/preview/form_preview.dart';
 import '../src/scenarios/scenarios.dart';
-import '../models/chat_message.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
 class WorkbenchShell extends StatefulWidget {
@@ -21,11 +22,37 @@ class WorkbenchShell extends StatefulWidget {
 
 class _WorkbenchShellState extends State<WorkbenchShell> {
   final WorkbenchController _controller = WorkbenchController();
-  
+  bool _legendOpen = false;
+
   @override
   void initState() {
     super.initState();
     _controller.init();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_controller.geminiService.hasApiKey) {
+        _showApiKeyDialog();
+      }
+    });
+  }
+
+  Future<void> _showApiKeyDialog() async {
+    final result = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => ApiKeyDialog(
+        initialKey: _controller.geminiService.apiKey,
+      ),
+    );
+    if (result != null) {
+      await _controller.geminiService.setApiKey(result);
+      _controller.notifyListeners();
+    }
+  }
+
+  void _toggleLegend() {
+    setState(() {
+      _legendOpen = !_legendOpen;
+    });
   }
 
   @override
@@ -37,7 +64,7 @@ class _WorkbenchShellState extends State<WorkbenchShell> {
   Widget _buildRightPanel(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final hasForm = _controller.committedParseResult.hasForm;
-    
+
     if (!hasForm) {
       return Container(
         color: cs.surface,
@@ -52,7 +79,7 @@ class _WorkbenchShellState extends State<WorkbenchShell> {
         ),
       );
     }
-    
+
     return Container(
       color: cs.surface,
       child: FormPreview(
@@ -77,7 +104,7 @@ class _WorkbenchShellState extends State<WorkbenchShell> {
       ),
     );
   }
-  
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -99,7 +126,11 @@ class _WorkbenchShellState extends State<WorkbenchShell> {
                           children: [
                             SizedBox(
                               height: 480,
-                              child: _UnifiedPanel(controller: _controller),
+                              child: _EditorPanel(
+                                controller: _controller,
+                                legendOpen: _legendOpen,
+                                onToggleLegend: _toggleLegend,
+                              ),
                             ),
                             Divider(color: cs.outlineVariant, height: 1),
                             SizedBox(
@@ -109,14 +140,18 @@ class _WorkbenchShellState extends State<WorkbenchShell> {
                           ],
                         );
                       }
-                      
+
                       return Row(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          // Left column: unified panel
+                          // Left column: editor panel
                           SizedBox(
                             width: constraints.maxWidth * 0.38,
-                            child: _UnifiedPanel(controller: _controller),
+                            child: _EditorPanel(
+                              controller: _controller,
+                              legendOpen: _legendOpen,
+                              onToggleLegend: _toggleLegend,
+                            ),
                           ),
                           VerticalDivider(
                             color: cs.outlineVariant,
@@ -143,7 +178,7 @@ class _WorkbenchShellState extends State<WorkbenchShell> {
 class _TopBar extends StatelessWidget {
   final WorkbenchController controller;
   const _TopBar({required this.controller});
-  
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -173,7 +208,6 @@ class _TopBar extends StatelessWidget {
                   color: cs.onSurface,
                 ),
               ),
-
             ],
           ),
           const SizedBox(width: AppSpacing.s5),
@@ -233,79 +267,36 @@ class _TopBar extends StatelessWidget {
               );
             },
           ),
-          const SizedBox(width: AppSpacing.s2),
-          FilledButton.tonalIcon(
-            icon: const Icon(Icons.auto_awesome, size: 14),
-            label: const Text('Share'),
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Work in progress')),
-              );
-            },
-          ),
         ],
       ),
     );
   }
 }
 
-class _UnifiedPanel extends StatefulWidget {
+// ── Editor panel (always shows code editor, no chat toggle) ───────────────────
+
+class _EditorPanel extends StatelessWidget {
   final WorkbenchController controller;
-  const _UnifiedPanel({required this.controller});
-  
-  @override
-  State<_UnifiedPanel> createState() => _UnifiedPanelState();
-}
+  final bool legendOpen;
+  final VoidCallback onToggleLegend;
 
-class _UnifiedPanelState extends State<_UnifiedPanel> {
-  final TextEditingController _composer = TextEditingController();
-  final ScrollController _scroll = ScrollController();
-
-  @override
-  void initState() {
-    super.initState();
-    widget.controller.addListener(_onChange);
-  }
-
-  @override
-  void dispose() {
-    widget.controller.removeListener(_onChange);
-    _composer.dispose();
-    _scroll.dispose();
-    super.dispose();
-  }
-
-  void _onChange() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scroll.hasClients) {
-        _scroll.animateTo(
-          _scroll.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 240),
-          curve: Curves.easeOutCubic,
-        );
-      }
-    });
-  }
-
-  Future<void> _send([String? text]) async {
-    final t = (text ?? _composer.text).trim();
-    if (t.isEmpty) return;
-    _composer.clear();
-    // Just add to history without triggering form generation
-    widget.controller.addMockMessage(t);
-  }
+  const _EditorPanel({
+    required this.controller,
+    required this.legendOpen,
+    required this.onToggleLegend,
+  });
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final c = widget.controller;
-    
+    final c = controller;
+
     return AnimatedBuilder(
       animation: c,
       builder: (context, child) {
         return Column(
           children: [
-            // Unified header - always visible
+            // Header: model selector
             Container(
               height: 56,
               padding: const EdgeInsets.symmetric(horizontal: AppSpacing.s5),
@@ -315,15 +306,6 @@ class _UnifiedPanelState extends State<_UnifiedPanel> {
               ),
               child: Row(
                 children: [
-                  // Text(
-                  //   'PROMPT',
-                  //   style: TextStyle(
-                  //     fontSize: 11,
-                  //     fontWeight: FontWeight.w600,
-                  //     letterSpacing: 0.5,
-                  //     color: cs.onSurfaceVariant,
-                  //   ),
-                  // ),
                   const SizedBox(width: AppSpacing.s3),
                   // Model selector dropdown
                   ValueListenableBuilder<String>(
@@ -336,17 +318,20 @@ class _UnifiedPanelState extends State<_UnifiedPanel> {
                           fontSize: 13,
                           color: cs.onSurface,
                         ),
-                        items: WorkbenchController.candidateModels.map((m) => DropdownMenuItem<String>(
-                          value: m,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: cs.secondaryContainer,
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text(m),
-                          ),
-                        )).toList(),
+                        items: WorkbenchController.candidateModels
+                            .map((m) => DropdownMenuItem<String>(
+                                  value: m,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: cs.secondaryContainer,
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text(m),
+                                  ),
+                                ))
+                            .toList(),
                         onChanged: (next) {
                           if (next != null && next != current) {
                             c.model.value = next;
@@ -356,56 +341,25 @@ class _UnifiedPanelState extends State<_UnifiedPanel> {
                     },
                   ),
                   const Spacer(),
-                  // Inactive history icon
-                  IconButton(
-                    icon: Icon(Icons.history, size: 18, color: cs.onSurfaceVariant),
-                    onPressed: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Work in progress')),
-                      );
-                    },
-                  ),
-                  // Inactive new thread icon
-                  IconButton(
-                    icon: Icon(Icons.add, size: 18, color: cs.onSurfaceVariant),
-                    onPressed: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Work in progress')),
-                      );
-                    },
-                  ),
-                  // Toggle button for Chat/Code
-                  c.showDslEditor
-                    ? TextButton.icon(
-                        icon: const Icon(Icons.chat, size: 16),
-                        label: const Text('← Chat'),
-                        onPressed: c.toggleDslEditor,
-                      )
-                    : FilledButton.tonalIcon(
-                        icon: const Icon(Icons.code, size: 16),
-                        label: const Text('Edit code'),
-                        onPressed: c.toggleDslEditor,
-                      ),
                 ],
               ),
             ),
-            // Body switches between chat and code editor
+            // Code editor area (fills remaining space)
             Expanded(
-              child: c.showDslEditor
-                ? _buildCodeEditor(context)
-                : _buildChatView(context),
+              child: _buildCodeEditor(context),
             ),
           ],
         );
       },
     );
   }
-  
+
   Widget _buildCodeEditor(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final c = widget.controller;
-    
+    final c = controller;
+
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         // Scenario selector bar
         Container(
@@ -417,262 +371,71 @@ class _UnifiedPanelState extends State<_UnifiedPanel> {
           ),
           child: Row(
             children: [
-              Text('Scenario:', style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
+              Text('Scenario:',
+                  style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
               const SizedBox(width: AppSpacing.s2),
               DropdownButton<String>(
                 value: c.currentScenarioId,
                 underline: const SizedBox.shrink(),
                 style: TextStyle(fontSize: 13, color: cs.onSurface),
-                items: kScenarios.map((s) => DropdownMenuItem<String>(
-                  value: s.id,
-                  child: Text(s.name),
-                )).toList(),
+                items: kScenarios
+                    .map((s) => DropdownMenuItem<String>(
+                          value: s.id,
+                          child: Text(s.name),
+                        ))
+                    .toList(),
                 onChanged: (scenarioId) {
                   if (scenarioId != null) {
                     c.onScenarioPicked(scenarioId);
                   }
                 },
               ),
+              const Spacer(),
+              // DSL reference toggle
+              IconButton(
+                tooltip: legendOpen ? 'Hide DSL reference' : 'DSL reference',
+                onPressed: onToggleLegend,
+                isSelected: legendOpen,
+                icon: const Icon(Icons.menu_book_outlined, size: 18),
+                selectedIcon: const Icon(Icons.menu_book, size: 18),
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.all(6),
+                constraints: const BoxConstraints(),
+              ),
             ],
           ),
         ),
-        // Code editor
+        // Code editor + optional legend drawer side by side
         Expanded(
-          child: CodeEditor(
-            code: c.dsl,
-            readOnly: false,
-            onChanged: c.onDslChanged,
-            errors: c.parseResult.errors
-                .map(
-                  (e) => EditorErrorMark(
-                    line: e.line,
-                    column: e.column,
-                    message: e.message,
-                    hint: e.hint,
-                  ),
-                )
-                .toList(),
-          ),
-        ),
-      ],
-    );
-  }
-  
-  Widget _buildChatView(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final c = widget.controller;
-    
-    return Column(
-      children: [
-        // Chat messages feed
-        Expanded(
-          child: ListView.separated(
-            controller: _scroll,
-            padding: const EdgeInsets.fromLTRB(
-              AppSpacing.s5,
-              AppSpacing.s5,
-              AppSpacing.s5,
-              AppSpacing.s3,
-            ),
-            itemCount: c.history.length + (c.generating ? 1 : 0),
-            separatorBuilder: (_, __) =>
-                const SizedBox(height: AppSpacing.s4),
-            itemBuilder: (context, i) {
-              if (i == c.history.length && c.generating) {
-                return c.streamingText.isNotEmpty 
-                  ? _MessageBubble(
-                      message: ChatMessage(
-                        role: ChatRole.ai,
-                        text: c.streamingText,
-                      ),
-                      onTapFollowup: _send,
-                    )
-                  : _StreamingBubble();
-              }
-              return _MessageBubble(
-                message: c.history[i],
-                onTapFollowup: _send,
-              );
-            },
-          ),
-        ),
-        // Composer input
-        Padding(
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.s5,
-            AppSpacing.s2,
-            AppSpacing.s5,
-            AppSpacing.s5,
-          ),
-          child: Container(
-            decoration: BoxDecoration(
-              color: cs.surfaceContainerHigh,
-              borderRadius: BorderRadius.circular(AppSpacing.rXl),
-              border: Border.all(color: cs.outlineVariant),
-            ),
-            padding: const EdgeInsets.fromLTRB(
-              AppSpacing.s4,
-              AppSpacing.s2,
-              AppSpacing.s2,
-              AppSpacing.s2,
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _composer,
-                    minLines: 1,
-                    maxLines: 5,
-                    onSubmitted: _send,
-                    decoration: InputDecoration(
-                      border: InputBorder.none,
-                      enabledBorder: InputBorder.none,
-                      focusedBorder: InputBorder.none,
-                      contentPadding: const EdgeInsets.symmetric(
-                        vertical: AppSpacing.s2,
-                      ),
-                      hintText:
-                          'Describe the form you want — e.g. "a 3-step onboarding…"',
-                      hintStyle: TextStyle(
-                        color: cs.onSurfaceVariant,
-                        fontSize: 14,
-                      ),
-                    ),
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.attach_file, size: 18),
-                  onPressed: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Work in progress')),
-                    );
-                  },
-                ),
-                IconButton(
-                  icon: const Icon(Icons.mic_none, size: 18),
-                  onPressed: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Work in progress')),
-                    );
-                  },
-                ),
-                Material(
-                  color: cs.primary,
-                  shape: const CircleBorder(),
-                  child: InkWell(
-                    customBorder: const CircleBorder(),
-                    onTap: c.generating ? null : () => _send(),
-                    child: SizedBox(
-                      width: 36,
-                      height: 36,
-                      child: Icon(
-                        Icons.arrow_upward,
-                        size: 18,
-                        color: cs.onPrimary,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _MessageBubble extends StatelessWidget {
-  final ChatMessage message;
-  final void Function(String) onTapFollowup;
-  const _MessageBubble({required this.message, required this.onTapFollowup});
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final isUser = message.role == ChatRole.user;
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: 28,
-          height: 28,
-          margin: const EdgeInsets.only(top: 2),
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            gradient: isUser
-                ? null
-                : LinearGradient(
-                    colors: [cs.tertiary, cs.primary],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-            color: isUser ? cs.secondaryContainer : null,
-          ),
-          alignment: Alignment.center,
-          child: Text(
-            isUser ? 'YO' : '✦',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: isUser ? cs.onSecondaryContainer : cs.onPrimary,
-            ),
-          ),
-        ),
-        const SizedBox(width: AppSpacing.s3),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(
-                isUser ? 'You' : 'Gemini',
-                style: TextStyle(
-                  fontSize: 11,
-                  color: cs.onSurfaceVariant,
-                  letterSpacing: 0.4,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(
+                      child: CodeEditor(
+                        code: c.dsl,
+                        readOnly: false,
+                        onChanged: c.onDslChanged,
+                        errors: c.parseResult.errors
+                            .map(
+                              (e) => EditorErrorMark(
+                                line: e.line,
+                                column: e.column,
+                                message: e.message,
+                                hint: e.hint,
+                              ),
+                            )
+                            .toList(),
+                      ),
+                    ),
+                    _ParseStatusFooter(parseResult: c.parseResult),
+                  ],
                 ),
               ),
-              const SizedBox(height: 2),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.s4,
-                  vertical: AppSpacing.s3,
-                ),
-                decoration: BoxDecoration(
-                  color: isUser ? cs.primaryContainer : cs.surfaceContainer,
-                  borderRadius: const BorderRadius.only(
-                    topLeft: Radius.circular(4),
-                    topRight: Radius.circular(AppSpacing.rL),
-                    bottomLeft: Radius.circular(AppSpacing.rL),
-                    bottomRight: Radius.circular(AppSpacing.rL),
-                  ),
-                ),
-                child: Text(
-                  message.text,
-                  style: TextStyle(
-                    fontSize: 14,
-                    height: 1.5,
-                    color: isUser ? cs.onPrimaryContainer : cs.onSurface,
-                  ),
-                ),
-              ),
-              if (message.followups != null && message.followups!.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: AppSpacing.s3),
-                  child: Wrap(
-                    spacing: AppSpacing.s2,
-                    runSpacing: AppSpacing.s2,
-                    children: [
-                      for (final s in message.followups!)
-                        _Chip(
-                          label: s,
-                          accent: true,
-                          onTap: () => onTapFollowup(s),
-                        ),
-                    ],
-                  ),
-                ),
+              if (legendOpen) LegendDrawer(onClose: onToggleLegend),
             ],
           ),
         ),
@@ -681,127 +444,77 @@ class _MessageBubble extends StatelessWidget {
   }
 }
 
-class _StreamingBubble extends StatefulWidget {
-  @override
-  State<_StreamingBubble> createState() => _StreamingBubbleState();
-}
+// ── Parse status footer ───────────────────────────────────────────────────────
 
-class _StreamingBubbleState extends State<_StreamingBubble>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl =
-      AnimationController(vsync: this, duration: const Duration(milliseconds: 1200))
-        ..repeat();
+/// A compact footer below the editor showing parse status.
+///
+/// - green ✓ "parsed cleanly" when [parseResult.isClean]
+/// - amber ⚠ "warnings: N" when errors present but form still renders
+/// - red ✕ "N error(s)" when fatal — form not rebuilt
+///
+/// The first error's line/col is appended in muted small text.
+class _ParseStatusFooter extends StatelessWidget {
+  const _ParseStatusFooter({required this.parseResult});
 
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
+  final ParseResult parseResult;
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: 28,
-          height: 28,
-          margin: const EdgeInsets.only(top: 2),
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            gradient: LinearGradient(
-              colors: [cs.tertiary, cs.primary],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-          ),
-          alignment: Alignment.center,
-          child: Text('✦', style: TextStyle(color: cs.onPrimary)),
+    final theme = Theme.of(context);
+    final textTheme = theme.textTheme;
+
+    late final Color iconColor;
+    late final IconData icon;
+    late final String label;
+
+    if (parseResult.isClean) {
+      iconColor = Colors.green;
+      icon = Icons.check_circle_outline;
+      label = 'parsed cleanly';
+    } else if (parseResult.hasErrors && parseResult.hasForm) {
+      // Soft errors — form still renders with warnings.
+      iconColor = Colors.amber;
+      icon = Icons.warning_amber_outlined;
+      final n = parseResult.errors.length;
+      label = 'warnings: $n';
+    } else {
+      // Fatal — form not rebuilt.
+      iconColor = Colors.red;
+      icon = Icons.cancel_outlined;
+      final n = parseResult.errors.length;
+      label = '$n error${n == 1 ? '' : 's'}';
+    }
+
+    final firstError =
+        parseResult.hasErrors ? parseResult.errors.first : null;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        border: Border(
+          top: BorderSide(color: theme.colorScheme.outlineVariant),
         ),
-        const SizedBox(width: AppSpacing.s3),
-        Row(
-          children: [
-            AnimatedBuilder(
-              animation: _ctrl,
-              builder: (_, __) {
-                return Row(
-                  children: List.generate(3, (i) {
-                    final phase = ((_ctrl.value + i * 0.15) % 1.0);
-                    final opacity = 0.3 + 0.7 * (1 - (phase - 0.5).abs() * 2).clamp(0.0, 1.0);
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 1.5),
-                      child: Container(
-                        width: 4,
-                        height: 4,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: cs.primary.withValues(alpha: opacity),
-                        ),
-                      ),
-                    );
-                  }),
-                );
-              },
-            ),
-            const SizedBox(width: AppSpacing.s2),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 14, color: iconColor),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: textTheme.labelSmall?.copyWith(color: iconColor),
+          ),
+          if (firstError != null) ...[
+            const SizedBox(width: 8),
             Text(
-              'Thinking…',
-              style: TextStyle(
-                fontSize: 13,
-                fontStyle: FontStyle.italic,
-                color: cs.onSurfaceVariant,
+              'Line ${firstError.line}, col ${firstError.column}',
+              style: textTheme.labelSmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                fontSize: 11,
               ),
             ),
           ],
-        ),
-      ],
-    );
-  }
-}
-
-class _Chip extends StatelessWidget {
-  final String label;
-  final bool accent;
-  final VoidCallback onTap;
-  const _Chip({required this.label, required this.onTap, this.accent = false});
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return Material(
-      color: cs.surfaceContainerHigh,
-      borderRadius: BorderRadius.circular(AppSpacing.rS),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(AppSpacing.rS),
-        onTap: onTap,
-        child: Container(
-          height: 28,
-          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.s3),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(AppSpacing.rS),
-            border: Border.all(color: cs.outlineVariant),
-          ),
-          alignment: Alignment.center,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.auto_awesome,
-                size: 12,
-                color: accent ? cs.primary : cs.onSurfaceVariant,
-              ),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: accent ? cs.primary : cs.onSurface,
-                ),
-              ),
-            ],
-          ),
-        ),
+        ],
       ),
     );
   }

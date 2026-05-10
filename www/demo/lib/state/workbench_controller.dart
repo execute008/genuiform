@@ -124,6 +124,8 @@ class WorkbenchController extends ChangeNotifier {
   String get streamingText => _streamingText;
   GeminiService get geminiService => _geminiService;
   
+  void refresh() => notifyListeners();
+
   Future<void> init() async {
     await _geminiService.init();
     
