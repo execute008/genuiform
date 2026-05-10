@@ -50,7 +50,7 @@ Google's [A2UI protocol](https://a2ui.org) (and the [`flutter/genui`](https://pu
 
 The two compose well. The hackathon workbench can render terminal outcome screens via `flutter/genui` (see `A2UI_AGENDA.md` for status); the form-collection loop itself stays inside genuiform's typed primitives.
 
-The workbench now demonstrates the full round-trip in one integrated flow: form completes → Vertex emits A2UI v0.9 JSON → `flutter/genui` renders the Surface → the in-Surface Restart button dispatches an A2UI action → the workbench restarts the form. This is a working integration showcase; the library itself (`genuiform`) is unchanged — it remains the constraints layer above, not an A2UI-native component. See `A2UI_C_V2_SPEC.md` for the implementation spec and `workbench/README.md` for how to run it.
+The workbench demonstrates the full round-trip in one integrated flow: form completes → Gemini emits A2UI v0.9 JSON → `flutter/genui` renders the Surface → the in-Surface Restart button dispatches an A2UI action → the workbench restarts the form. A2UI plumbing lives in the separate `genuiform_a2ui` package (`a2ui/`) so apps that don't need it don't pull in `genui`. The library itself (`genuiform`) is unchanged — it remains the constraints layer above, not an A2UI-native component. See `A2UI_C_V2_SPEC.md` for the implementation spec and `www/demo/README.md` for how to run the workbench.
 
 ---
 
@@ -332,6 +332,7 @@ class Session {
   final SessionStatus status;          // active | completed | abandoned | escalated
   final EngagementSignal lastSignal;   // strong | weak | negative
   final Outcome? reachedOutcome;
+  final String? pendingExitLayerId;    // set while form is offering a Layer exit
 }
 ```
 
@@ -347,12 +348,12 @@ abstract class Strategy {
 }
 
 sealed class StepEvent {}
-class StepReady     extends StepEvent { final QuizStepSpec spec; }
-class LayerComplete extends StepEvent { final Layer layer; final bool offerExit; }
-class BranchTaken   extends StepEvent { final String branchId; final String optionId; }
+class StepReady      extends StepEvent { final QuizStepSpec spec; final bool isExitOffer; }
+class LayerComplete  extends StepEvent { final Layer layer; final bool offerExit; }
+class BranchTaken    extends StepEvent { final String branchId; final String optionId; }
 class OutcomeReached extends StepEvent { final Outcome outcome; final FormResult result; }
 class EscalationFired extends StepEvent { final EscalateIf rule; }
-class StreamError   extends StepEvent { final Object error; }
+class StreamError    extends StepEvent { final Object error; }
 ```
 
 Two concrete strategies ship in v1:
@@ -380,13 +381,17 @@ abstract class LlmClient {
 }
 ```
 
-### GeminiApiClient — for hackathon and dev
+### GeminiApiClient — browser-safe, dev and production
 
-Calls Google AI Studio's Gemini API directly with a static `AIza...` key. Fine for demos, hackathon runs, and server-side usage. For shipped Flutter apps, use `VertexProxyClient` or wrap `FirebaseVertexAI.instance` instead.
+Calls Google AI Studio's Gemini API directly with a static `AIza...` key. Works in Flutter Web without a proxy. Fine for demos, server-side usage, and production apps that don't use Firebase.
 
 ```dart
 final client = GeminiApiClient(apiKey: 'AIza...');
 ```
+
+The client streams SSE deltas and caches the system prompt across form turns via `cachedContents`, so the first turn pays the cache-write cost and subsequent turns hit the cache (typically 60–80 % prompt-token savings on long system prompts).
+
+> **Not a Vertex client.** `GeminiApiClient` calls `generativelanguage.googleapis.com`, not Vertex AI endpoints. For a true Vertex AI integration in Flutter, see `VertexProxyClient` below or wrap `FirebaseVertexAI.instance`.
 
 ### VertexProxyClient — for production (GymGeist via Firebase Functions)
 
@@ -416,12 +421,13 @@ The library does not ship with an enforced default model. Consumers pick based o
 | `gemini-3.1-flash-lite-preview` | Flash-Lite | Preview | Highest-volume, cost-sensitive deployments. Cheapest per step, lowest latency. Less suited to nuanced branch decisions. |
 | `gemini-3.1-pro-preview` | Pro | Preview | High-stakes branches only (medical screening, large-deal qualification). Overkill for routine steps; latency cost is real. |
 
-**Notes for the build:**
+**Notes:**
 
 - All 3-series models are currently Preview. Vertex AI guarantees at least 2 weeks notice before deprecation, but the model string can change. Production consumers should monitor the Vertex AI release notes.
 - `gemini-3-pro-preview` was discontinued March 26, 2026 — do not use this string. `gemini-3.1-pro-preview` is the replacement.
 - Gemini 2.5 family retirement was extended to October 16, 2026, making `gemini-2.5-flash` viable as a stable default for the next ~5 months.
-- The library should accept any model ID string and not maintain a hard-coded enum — this is a fast-moving target.
+- `-latest` aliases (e.g. `gemini-flash-latest`) are accepted by `GeminiApiClient` but the `responseJsonSchema` parameter is not supported on all `-latest` aliases — pin a specific versioned string when using structured output.
+- The library accepts any model ID string and does not maintain a hard-coded enum — this is a fast-moving target.
 
 **Suggested mixed strategy** (post-hackathon, when the library matures):
 - `gemini-3-flash` or `gemini-2.5-flash` for routine step generation
@@ -629,7 +635,7 @@ This single config replaces three separate flows in current GymGeist (onboarding
 ## 12. Architecture
 
 ```
-genuiform/
+genuiform/                                # core library (pub-publishable)
 ├── lib/
 │   ├── genuiform.dart                    # public exports
 │   └── src/
@@ -642,6 +648,7 @@ genuiform/
 │       │   ├── posture.dart              # Posture + presets
 │       │   ├── outcomes.dart             # OutcomeNode tree + Layer/Branch/Outcome
 │       │   ├── session.dart              # Session + EngagementSignal
+│       │   ├── step_event.dart           # StepReady (isExitOffer), LayerComplete, …
 │       │   └── form_result.dart
 │       ├── strategies/
 │       │   ├── strategy.dart
@@ -649,8 +656,9 @@ genuiform/
 │       │   └── generative_strategy.dart
 │       ├── llm/
 │       │   ├── llm_client.dart
-│       │   ├── vertex_direct_client.dart
-│       │   ├── vertex_proxy_client.dart
+│       │   ├── gemini_api_client.dart    # Google AI Studio (browser-safe, caching)
+│       │   ├── vertex_proxy_client.dart  # Firebase Function proxy
+│       │   ├── fake_llm_client.dart      # scripted test double (exported)
 │       │   └── schemas.dart
 │       ├── runtime/
 │       │   ├── constraint_enforcer.dart  # checks every turn
@@ -668,74 +676,99 @@ genuiform/
 │   └── lib/
 │       ├── main.dart
 │       └── scenarios/
-│           ├── freelance_qualification.dart  # hackathon demo
-│           └── gymgeist_onboarding.dart      # production preview
+│           ├── freelance_qualification.dart
+│           └── gymgeist_onboarding.dart
+├── pubspec.yaml
+│
+a2ui/                                     # genuiform_a2ui — optional A2UI v0.9 plumbing
+├── lib/src/
+│   ├── a2ui_outcome_emitter.dart         # Gemini emits A2UI JSON per outcome
+│   ├── a2ui_outcome_source.dart          # seam (GeminiA2uiOutcomeSource, …)
+│   ├── a2ui_outcome_loader.dart          # 5s timeout + fallback
+│   ├── a2ui_action_handler.dart          # wires in-Surface actions to callbacks
+│   └── a2ui_outcome_prompt.dart          # outcome → A2UI prompt template
 └── pubspec.yaml
+│
+www/                                      # deployed artifacts (SST on AWS)
+├── landing/                              # genuiform.draht.dev (Vite/static)
+├── demo/                                 # workbench.genuiform.draht.dev (Flutter Web)
+│   └── lib/src/
+│       ├── editor/                       # DSL lexer, parser, AST, builder
+│       ├── preview/                      # GenuiForm host + A2UI renderer
+│       ├── chat/                         # DSL agent chat panel
+│       └── scenarios/                    # 4 bundled DSL presets
+└── sst.config.ts
 ```
 
 ---
 
-## 13. Hackathon scope (Saturday May 9, 12:00–18:00)
+## 13. Build status
 
-The library should be ~80% done before Saturday. Hackathon time is for demo polish and judging-friendly extras, not core engineering.
+### 13.1 Core library — shipped
 
-### 13.1 Pre-hackathon (this week)
-
-- [x] Models: `QuizStepSpec`, `Contract`, `FieldSpec`, `Constraint` variants, `Posture`, `OutcomeNode` tree types, `Session`
-- [x] Icon registry with the ~160 GymGeist icons
-- [x] `LlmClient` interface + `GeminiApiClient` + `VertexProxyClient`
+- [x] Models: `QuizStepSpec`, `Contract`, `FieldSpec`, `Constraint` variants, `Posture`, `OutcomeNode` tree types, `Session` (+ `pendingExitLayerId`)
+- [x] Icon registry with ~160 GymGeist icons
+- [x] `LlmClient` interface + `GeminiApiClient` (SSE streaming, system-prompt caching) + `VertexProxyClient` + `FakeLlmClient`
 - [x] `ConstraintEnforcer`, `OutcomeNavigator`, `EngagementReader`
-- [x] `GenerativeStrategy` (non-streaming first, streaming if time)
-- [x] All 7 input renderer widgets (port from GymGeist)
-- [x] `GenuiForm` widget + `FormController`
-- [x] Working example: freelance qualification with branching outcomes
-- [x] Working example stub: GymGeist onboarding ladder
+- [x] `GenerativeStrategy` + `GuidedStrategy` (both streaming)
+- [x] Exit-offer state: `pendingExitLayerId` in `Session`, `isExitOffer` on `StepReady`
+- [x] Retry after `StreamError` (history de-duplication fixed)
+- [x] All 7 input renderer widgets ported from GymGeist
+- [x] `GenuiForm` widget + `FormController` (with `onControllerCreated` callback)
+- [x] Examples: freelance qualification (branching) and GymGeist onboarding (ladder + branch)
+- [x] 528 unit + widget tests; gated Vertex integration tests in `integration_test/`
 
-### 13.2 Hackathon Saturday
+### 13.2 Workbench + A2UI — shipped (hackathon + day-after polish)
 
-- [x] Polish: streaming "thinking" indicator, answer history sidebar, scenario presets
-- [x] **The killer demo**: split screen, two simulated users (engaged CTO / tired founder), same form, watch it adapt depth in real time
-- [x] Visual: outcome tree visualizer that lights up the active path as the form runs
-- [ ] Error states, retries, edge cases the judges will poke
-- [ ] 90-second pitch script
-- [ ] Live demo deploy
+- [x] Live DSL editor: parse-and-rebuild (250 ms debounce), error indicators, parse footer
+- [x] 4 bundled scenarios: `lead_qualification`, `gymgeist_onboarding`, `newsletter_signup`, `medical_intake`
+- [x] DSL autocomplete, reference drawer, model picker, temperature slider, progress drawer
+- [x] Material 3 dark UI with branded splash screen
+- [x] URL hash state (gzip + base64url), mock mode (`USE_MOCK=true`)
+- [x] DSL agent chat panel — AI-assisted form generation inside the workbench
+- [x] `genuiform_a2ui` package: Gemini emits A2UI v0.9 JSON per outcome, `flutter/genui` renders the Surface, in-Surface Restart action wired through
+- [x] Landing page at `genuiform.draht.dev`, workbench at `workbench.genuiform.draht.dev` (SST on AWS)
 
-### 13.3 Post-hackathon (week of May 11)
+### 13.3 Post-hackathon roadmap
 
-- [ ] `VertexProxyClient` + Firebase Function reference impl
-- [ ] `GuidedStrategy` (for production mode)
-- [ ] GymGeist integration: replace onboarding, then workout, then nutrition
-- [ ] Session persistence (resume support)
-- [ ] Pub.dev publish or keep private
-
----
-
-## 14. Demo storyboard
-
-**Setup (10s):** "Static forms ask everyone the same questions. Same depth. Same wording. Watch a generative form do better."
-
-**Demo 1 — Adaptive depth (40s):** GymGeist onboarding ladder.
-- Left split: simulated engaged user — long answers, momentum, expressed enthusiasm.
-- Right split: simulated tired user — short answers, "idk," hedging.
-- Same form config. Same outcome tree. Left user reaches `with_meal_plan` in 14 questions. Right user gracefully exits at `account_only` after 4. Both feel respected. Both convert.
-
-**Demo 2 — Branching outcomes (30s):** Freelance lead qualification.
-- Type as a senior CTO with clear brief: form asks 4 questions, picks `book_call`, surfaces calendar.
-- Type as a confused early founder: form asks 7 questions, picks `send_proposal`, captures email.
-- Type as someone with €500/month budget and €30k/month scope: form asks 3 questions, picks `decline`, politely closes.
-
-**The pitch (20s):** "Four primitives. Contract for what to collect. Constraints for what must never happen. Posture for how it should feel. Outcomes for where it can land. Generative inside, predictable outside. Built for Flutter, powered by Vertex AI. Already shipping in two real apps next week."
+- [ ] GymGeist integration: replace static onboarding flow (Phase 10)
+- [ ] Session persistence — JSON resume support
+- [ ] `HybridStrategy` — mandatory guided steps + generative tail
+- [ ] Per-branch model override (Pro for high-stakes branches, Flash for routine)
+- [ ] Pub.dev publish (after GymGeist integration validates the public API)
 
 ---
 
-## 15. Open questions (for the build)
+## 14. Live workbench
 
-- **Streaming partial JSON.** Gemini supports streaming, but partial JSON during generation is malformed. Plan: buffer until valid for v1, evaluate fragment-render later.
-- **Engagement signal calibration.** The LLM's read of "engagement" is itself a soft signal. We need a fallback heuristic (answer length, response time) for when the LLM read seems wrong.
-- **Branch criteria evaluation timing.** Should the LLM evaluate branch criteria after every answer, or only when the running contract is fillable? Default: only when fillable, otherwise the LLM second-guesses itself constantly.
-- **Layer exit prompt wording.** When pacing + engagement triggers an exit offer, the LLM generates the exit prompt itself — but it must be a true offer, not a suggestion-disguised-as-question. Worth a posture sub-knob.
-- **Branch contracts and the LLM's prompt.** When a branch hasn't been resolved yet, do we tell the LLM about *all* options' `contractDelta` fields (so it can use them in routing) or only the chosen one's after resolution? Default for v1: surface all options' deltas during routing — the field descriptions are what makes each criterion concrete and helps the LLM pick the right path.
-- **Tree mutation mid-form.** Should outcomes be modifiable after the form starts? (e.g. user reveals they're a minor → snip the deep layers off). Out of scope for v1.
+The workbench is deployed at **[workbench.genuiform.draht.dev](https://workbench.genuiform.draht.dev)**. Bring your own Google AI Studio key from [aistudio.google.com/apikey](https://aistudio.google.com/apikey) — no GCP project needed.
+
+**What you can do there:**
+- Edit the DSL live and watch the form rebuild in real time
+- Switch between 4 bundled scenarios from the top-bar dropdown
+- Adjust the model and temperature mid-session
+- Open the DSL agent chat to generate or modify a form in plain English
+- Enable the A2UI outcome screen (`USE_A2UI_HANDOFF=true` at build time) to see Gemini emit a live `flutter/genui` Surface per outcome
+
+Run locally:
+
+```bash
+cd www/demo
+flutter run -d chrome --dart-define=GEMINI_API_KEY=AIza...
+# for a stage-safe path that never calls the LLM:
+flutter run -d chrome --dart-define=USE_MOCK=true
+```
+
+---
+
+## 15. Open questions
+
+- **Streaming partial JSON** — resolved for v1: buffer until the full delta accumulates into valid JSON, then parse. Fragment-render is backlogged.
+- **Engagement signal calibration.** The LLM's engagement read is a soft signal; the fallback heuristic (answer length, response time) is not yet implemented. Worth a v0.2 ticket if branch-depth decisions feel random.
+- **Layer exit prompt wording.** The `isExitOffer` flag is wired through `StepReady` and `FormController`. The LLM still generates the exit prompt text — whether it reads as a genuine offer vs. a veiled push depends on the posture voice. A sub-knob is on the backlog.
+- **Branch contracts and the LLM's prompt.** Current v1 default: surface all options' `contractDelta` fields during routing so the LLM can use field descriptions to pick the right path. Revisit if prompt size becomes a concern.
+- **Tree mutation mid-form.** Out of scope for v1. If a constraint fires `StopIf`, the form ends; there's no path-pruning at runtime.
+- **Per-branch model override.** LLM model is set at the strategy level. A `model` override on `Branch` (to use Pro for high-stakes routing, Flash for routine steps) is designed in §9.3 but not yet implemented.
 
 ---
 
@@ -758,6 +791,6 @@ A common pattern: pick a Flash-tier model for routine steps, escalate to `gemini
 
 ## 17. License & distribution
 
-MIT, public on GitHub. `freye-tech/genuiform`. README is this document. Pub.dev publication after the GymGeist integration validates the API.
+MIT, copyright Oskar Freye. Public on GitHub at `execute008/genuiform`. Pub.dev publication after the GymGeist integration validates the public API.
 
 This becomes part of the freye.tech invisible funnel: a Flutter dev who wants generative forms finds the package, sees the author, follows the freelance work. Same playbook as the Nano Framework — give the tool away, the expertise to deploy it is the product.
