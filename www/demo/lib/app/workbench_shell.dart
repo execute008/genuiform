@@ -24,6 +24,7 @@ class WorkbenchShell extends StatefulWidget {
 class _WorkbenchShellState extends State<WorkbenchShell> {
   final WorkbenchController _controller = WorkbenchController();
   bool _legendOpen = false;
+  bool _showChat = false;
 
   @override
   void initState() {
@@ -132,6 +133,9 @@ class _WorkbenchShellState extends State<WorkbenchShell> {
                                 controller: _controller,
                                 legendOpen: _legendOpen,
                                 onToggleLegend: _toggleLegend,
+                                showChat: _showChat,
+                                onToggleChat: () =>
+                                    setState(() => _showChat = !_showChat),
                               ),
                             ),
                             Divider(color: cs.outlineVariant, height: 1),
@@ -146,23 +150,16 @@ class _WorkbenchShellState extends State<WorkbenchShell> {
                       return Row(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          // Chat panel (wide only)
-                          if (_controller.chatOpen) ...[
-                            SizedBox(
-                              width: 320,
-                              child: AgentChatPanel(
-                                  controller: _controller),
-                            ),
-                            VerticalDivider(
-                                color: cs.outlineVariant, width: 1),
-                          ],
-                          // Left column: editor panel
+                          // Left column: editor/chat panel
                           SizedBox(
                             width: constraints.maxWidth * 0.38,
                             child: _EditorPanel(
                               controller: _controller,
                               legendOpen: _legendOpen,
                               onToggleLegend: _toggleLegend,
+                              showChat: _showChat,
+                              onToggleChat: () =>
+                                  setState(() => _showChat = !_showChat),
                             ),
                           ),
                           VerticalDivider(
@@ -231,39 +228,6 @@ class _TopBar extends StatelessWidget {
           const SizedBox(width: AppSpacing.s4),
 
           const Spacer(),
-          AnimatedBuilder(
-            animation: controller,
-            builder: (context, _) {
-              final wide =
-                  MediaQuery.of(context).size.width >= 860;
-              return IconButton(
-                tooltip: controller.chatOpen
-                    ? 'Hide agent chat'
-                    : 'DSL agent chat',
-                isSelected: controller.chatOpen,
-                onPressed: () {
-                  if (wide) {
-                    controller.toggleChat();
-                  } else {
-                    showModalBottomSheet<void>(
-                      context: context,
-                      isScrollControlled: true,
-                      builder: (ctx) => SizedBox(
-                        height:
-                            MediaQuery.of(ctx).size.height * 0.75,
-                        child: AgentChatPanel(
-                            controller: controller),
-                      ),
-                    );
-                  }
-                },
-                icon: const Icon(Icons.smart_toy_outlined, size: 18),
-                selectedIcon:
-                    const Icon(Icons.smart_toy, size: 18),
-              );
-            },
-          ),
-          const SizedBox(width: AppSpacing.s2),
           _TemperatureSlider(notifier: controller.temperature),
           const SizedBox(width: AppSpacing.s3),
           IconButton(
@@ -324,17 +288,21 @@ class _TopBar extends StatelessWidget {
   }
 }
 
-// ── Editor panel (always shows code editor, no chat toggle) ───────────────────
+// ── Editor / Chat panel ───────────────────────────────────────────────────────
 
 class _EditorPanel extends StatelessWidget {
   final WorkbenchController controller;
   final bool legendOpen;
   final VoidCallback onToggleLegend;
+  final bool showChat;
+  final VoidCallback onToggleChat;
 
   const _EditorPanel({
     required this.controller,
     required this.legendOpen,
     required this.onToggleLegend,
+    required this.showChat,
+    required this.onToggleChat,
   });
 
   @override
@@ -347,57 +315,77 @@ class _EditorPanel extends StatelessWidget {
       builder: (context, child) {
         return Column(
           children: [
-            // Header: model selector
+            // Header: Code/Chat toggle + model selector
             Container(
               height: 56,
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.s5),
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.s4),
               decoration: BoxDecoration(
                 color: cs.surfaceContainerLow,
                 border: Border(bottom: BorderSide(color: cs.outlineVariant)),
               ),
               child: Row(
                 children: [
-                  const SizedBox(width: AppSpacing.s3),
-                  // Model selector dropdown
-                  ValueListenableBuilder<String>(
-                    valueListenable: c.model,
-                    builder: (context, current, _) {
-                      return DropdownButton<String>(
-                        value: current,
-                        underline: const SizedBox.shrink(),
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: cs.onSurface,
-                        ),
-                        items: WorkbenchController.candidateModels
-                            .map((m) => DropdownMenuItem<String>(
-                                  value: m,
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 8, vertical: 2),
-                                    decoration: BoxDecoration(
-                                      color: cs.secondaryContainer,
-                                      borderRadius: BorderRadius.circular(4),
-                                    ),
-                                    child: Text(m),
-                                  ),
-                                ))
-                            .toList(),
-                        onChanged: (next) {
-                          if (next != null && next != current) {
-                            c.model.value = next;
-                          }
-                        },
-                      );
-                    },
+                  SegmentedButton<bool>(
+                    segments: const [
+                      ButtonSegment(
+                        value: false,
+                        label: Text('Code'),
+                        icon: Icon(Icons.code, size: 14),
+                      ),
+                      ButtonSegment(
+                        value: true,
+                        label: Text('Chat'),
+                        icon: Icon(Icons.smart_toy_outlined, size: 14),
+                      ),
+                    ],
+                    selected: {showChat},
+                    onSelectionChanged: (_) => onToggleChat(),
+                    style: SegmentedButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      textStyle: const TextStyle(fontSize: 13),
+                    ),
                   ),
+                  const SizedBox(width: AppSpacing.s3),
+                  if (!showChat) ...[
+                    ValueListenableBuilder<String>(
+                      valueListenable: c.model,
+                      builder: (context, current, _) {
+                        return DropdownButton<String>(
+                          value: current,
+                          underline: const SizedBox.shrink(),
+                          style: TextStyle(fontSize: 13, color: cs.onSurface),
+                          items: WorkbenchController.candidateModels
+                              .map((m) => DropdownMenuItem<String>(
+                                    value: m,
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 8, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: cs.secondaryContainer,
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                      child: Text(m),
+                                    ),
+                                  ))
+                              .toList(),
+                          onChanged: (next) {
+                            if (next != null && next != current) {
+                              c.model.value = next;
+                            }
+                          },
+                        );
+                      },
+                    ),
+                  ],
                   const Spacer(),
                 ],
               ),
             ),
-            // Code editor area (fills remaining space)
+            // Body: code editor or agent chat
             Expanded(
-              child: _buildCodeEditor(context),
+              child: showChat
+                  ? AgentChatPanel(controller: c)
+                  : _buildCodeEditor(context),
             ),
           ],
         );
