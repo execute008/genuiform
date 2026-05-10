@@ -337,6 +337,40 @@ void main() {
       final result = enforcer.inspectAnswer(answer, sampleSession());
       expect(result, isA<Stop>());
     });
+
+    test('reproduction: StopIf fails to catch trigger in List answer (multiChoice)', () {
+      final enforcer = ConstraintEnforcer([
+        StopIf(trigger: 'under 16'),
+      ]);
+      // Currently, _matchAnswerText returns false if answer is not a String
+      final answer = sampleAnswer(answer: ['option1', 'under 16']);
+      final result = enforcer.inspectAnswer(answer, sampleSession());
+      expect(result, isA<Stop>(), reason: 'Should catch trigger in List answer');
+    });
+
+    test('reproduction: StopIf fails to catch trigger in choice label but not ID', () {
+      final enforcer = ConstraintEnforcer([
+        StopIf(trigger: 'under 16'),
+      ]);
+
+      final step = choiceStep(
+        id: 'age_group',
+        choices: [
+          const QuizChoice(id: 'group_a', label: 'I am under 16 years old'),
+          const QuizChoice(id: 'group_b', label: 'I am 16 or older'),
+        ],
+      );
+
+      // Answer is the choice ID 'group_a'
+      final answer = sampleAnswer(
+        stepId: 'age_group',
+        stepSpec: step,
+        answer: 'group_a',
+      );
+
+      final result = enforcer.inspectAnswer(answer, sampleSession());
+      expect(result, isA<Stop>(), reason: 'Should catch trigger in choice label');
+    });
   });
 
   // ── RequireConsent ────────────────────────────────────────────────────────

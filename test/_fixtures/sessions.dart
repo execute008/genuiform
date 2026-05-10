@@ -191,13 +191,14 @@ QuizStepSpec sampleStep({
 /// Builds a minimal [Answer] for use in test assertions.
 Answer sampleAnswer({
   String stepId = 'test_step',
+  QuizStepSpec? stepSpec,
   dynamic answer = 'some answer',
   EngagementSignal engagement = EngagementSignal.weak,
   DateTime? timestamp,
 }) {
   return Answer(
     stepId: stepId,
-    stepSpec: sampleStep(id: stepId),
+    stepSpec: stepSpec ?? sampleStep(id: stepId),
     answer: answer,
     timestamp: timestamp ?? DateTime(2026, 5, 5, 12),
     engagement: engagement,
