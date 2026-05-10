@@ -47,6 +47,7 @@ class WorkbenchController extends ChangeNotifier {
   late final ValueNotifier<String> _geminiKey;
   late final ValueNotifier<String> _model;
   late final ValueNotifier<double> _temperature;
+  final ValueNotifier<bool> _mascotEnabled = ValueNotifier<bool>(true);
 
   // Form controller reference for progress drawer
   final ValueNotifier<FormController?> controllerRef = ValueNotifier<FormController?>(null);
@@ -82,6 +83,7 @@ class WorkbenchController extends ChangeNotifier {
   int get formKey => _formKey;
   ValueNotifier<String> get model => _model;
   ValueNotifier<double> get temperature => _temperature;
+  ValueNotifier<bool> get mascotEnabled => _mascotEnabled;
   
   bool get hasGemini => _geminiKey.value.isNotEmpty || _geminiService.hasApiKey;
 
@@ -405,6 +407,7 @@ class WorkbenchController extends ChangeNotifier {
     _geminiKey.dispose();
     _model.dispose();
     _temperature.dispose();
+    _mascotEnabled.dispose();
     _agentService = null;
     super.dispose();
   }
