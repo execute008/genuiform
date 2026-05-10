@@ -22,7 +22,12 @@ export default $config({
     const demo = new sst.aws.StaticSite("Demo", {
       path: "demo",
       build: {
-        command: "flutter build web --release",
+        // --dart2js-optimization=O1 is a workaround for release-only Flutter
+        // web bugs that don't repro in `flutter run` (default optimization is
+        // O4, which has produced rendering / repaint regressions in past
+        // releases — see flutter#130961, flutter#160327). Larger bundle, but
+        // dodges the optimizer.
+        command: "flutter build web --release --dart2js-optimization=O1",
         output: "build/web",
       },
       domain: "workbench.genuiform.draht.dev",
