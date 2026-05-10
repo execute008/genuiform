@@ -1,0 +1,1 @@
+ /Users/ivanpopov/Desktop/genuniform/genuiform/demo/build/1712531c397699eb58f13b43c4a49e0a/dart_build_result.json:  /Users/ivanpopov/Desktop/genuniform/genuiform/demo/.dart_tool/package_config.json /Users/ivanpopov/Desktop/genuniform/genuiform/demo/pubspec.yaml /opt/homebrew/share/flutter/bin/cache/dart-sdk/version
