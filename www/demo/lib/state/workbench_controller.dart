@@ -144,19 +144,19 @@ class WorkbenchController extends ChangeNotifier {
   void refresh() => notifyListeners();
 
   Future<void> init() async {
-    await _geminiService.init();
-    
-    // Initialize LLM client configuration
+    // Initialize synchronously before any await so late fields are ready for
+    // the first build() frame (which fires before the async SharedPreferences
+    // read in _geminiService.init() completes).
     _geminiKey = ValueNotifier(_envGeminiKey);
     _model = ValueNotifier(_initialModel);
     _temperature = ValueNotifier(0.7);
-    
-    // Initialize DSL with first scenario
     _dsl = kScenarios.first.dsl;
     _currentScenarioId = kScenarios.first.id;
     _parseResult = parseDsl(_dsl);
     _committedParseResult = _parseResult;
-    
+
+    await _geminiService.init();
+
     notifyListeners();
   }
 
