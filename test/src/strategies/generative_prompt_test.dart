@@ -218,32 +218,6 @@ void main() {
     test('byte-identical across sessions with different histories and currentNode positions', () {
       final promptA = buildStaticSystemPrompt(config);
 
-      // Different session: has history, different currentNode
-      final differentSession = Session(
-        currentNode: Outcome(
-          id: 'other_node',
-          contractDelta: Contract(fields: {'extra': const FieldSpec(type: 'String', required: false)}),
-          handoff: null,
-        ),
-        history: [
-          Answer(
-            stepId: 'q1',
-            stepSpec: sampleStep(id: 'q1', title: 'Name?'),
-            answer: 'Bob',
-            timestamp: DateTime(2026, 1, 1),
-            engagement: EngagementSignal.strong,
-          ),
-        ],
-        answers: {'q1': 'Bob'},
-        runningContract: Contract(fields: {
-          'name': const FieldSpec(type: 'String', required: true),
-          'email': const FieldSpec(type: 'String', required: true),
-          'extra': const FieldSpec(type: 'String', required: false),
-        }),
-        status: SessionStatus.active,
-        lastSignal: EngagementSignal.strong,
-      );
-
       // buildStaticSystemPrompt takes only config — session is irrelevant
       final promptB = buildStaticSystemPrompt(config);
 

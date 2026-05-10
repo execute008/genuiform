@@ -4,6 +4,11 @@ analyzer:
   exclude:
     - "**/*.g.dart"
     - "**/*.freezed.dart"
+    # Sub-packages have their own pubspecs and analysis_options.
+    - "a2ui/**"
+    - "example/**"
+    - "workbench/**"
+    - "www/**"
   errors:
     invalid_annotation_target: ignore
 
