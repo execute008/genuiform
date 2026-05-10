@@ -278,13 +278,51 @@ class ConstraintEnforcer {
 
   // ── Private helpers ───────────────────────────────────────────────────────
 
-  /// Case-insensitive substring check against [answer.answer] as a String.
-  /// Returns `false` if the answer value is not a String.
+  /// Case-insensitive substring check against [answer.answer].
+  ///
+  /// Checks:
+  /// 1. The raw answer value (if it's a String).
+  /// 2. If it's a choice/multiChoice, the labels of the selected choices.
+  /// 3. If it's a List (multiChoice), all String elements in the list.
   bool _matchAnswerText(Answer answer, String trigger) {
-    if (answer.answer is! String) return false;
-    return (answer.answer as String)
-        .toLowerCase()
-        .contains(trigger.toLowerCase());
+    final needle = trigger.toLowerCase();
+
+    // 1. Check raw answer value (String)
+    final rawValue = answer.answer;
+    if (rawValue is String) {
+      if (rawValue.toLowerCase().contains(needle)) return true;
+    }
+
+    // 2. Check choice labels if this was a choice-based step
+    final choices = answer.stepSpec.choices;
+    if (choices != null && choices.isNotEmpty) {
+      if (rawValue is String) {
+        // Single choice ID
+        final selected = choices.where((c) => c.id == rawValue).firstOrNull;
+        if (selected != null &&
+            selected.label.toLowerCase().contains(needle)) {
+          return true;
+        }
+      } else if (rawValue is List) {
+        // Multiple choice IDs
+        final selectedIds = rawValue.map((e) => e.toString()).toSet();
+        final selectedChoices = choices.where((c) => selectedIds.contains(c.id));
+        for (final c in selectedChoices) {
+          if (c.label.toLowerCase().contains(needle)) return true;
+        }
+      }
+    }
+
+    // 3. Check List elements (for cases where raw values are not choice IDs)
+    if (rawValue is List) {
+      for (final element in rawValue) {
+        if (element is String && element.toLowerCase().contains(needle)) {
+          return true;
+        }
+      }
+    }
+
+    return false;
   }
 
   /// The replacement step used by [NeverCollect]: a no-input information step

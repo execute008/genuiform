@@ -295,10 +295,10 @@ class GenerativeStrategy extends Strategy {
     final unit = json['unit'];
     if (min != null || max != null || step != null || unit != null) {
       configuration = {
-        'min': ?min,
-        'max': ?max,
-        'step': ?step,
-        'unit': ?unit,
+        'min': min,
+        'max': max,
+        'step': step,
+        'unit': unit,
       };
     }
 
