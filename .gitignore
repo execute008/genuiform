@@ -43,3 +43,4 @@ lcov.info
 .claude/
 a2ui/build
 www/.sst
+www/landing/dist
