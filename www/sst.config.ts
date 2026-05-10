@@ -22,15 +22,28 @@ export default $config({
     const demo = new sst.aws.StaticSite("Demo", {
       path: "demo",
       build: {
-        // --dart2js-optimization=O1 is a workaround for release-only Flutter
-        // web bugs that don't repro in `flutter run` (default optimization is
-        // O4, which has produced rendering / repaint regressions in past
-        // releases — see flutter#130961, flutter#160327). Larger bundle, but
-        // dodges the optimizer.
-        command: "flutter build web --release --dart2js-optimization=O1",
+        command: "flutter build web --release --wasm",
         output: "build/web",
       },
       domain: "workbench.genuiform.draht.dev",
+      // Disable CloudFront's automatic compression. Diagnosed live:
+      // byte-identical Flutter web bundle renders correctly with no
+      // compression (local HTTP serve) AND with gzip (cloudflared
+      // tunnel of the same local serve), but freezes when CloudFront
+      // (or Netlify) serves it with `content-encoding: br`. The
+      // dialog still opens (early setState works), but later
+      // StreamBuilder rebuilds driven by the LLM streaming response
+      // never paint until the user resizes the window. Compression
+      // off makes CloudFront serve the bundle uncompressed; the
+      // browser still gets correct bytes (md5 verified) and rebuilds
+      // pump fine.
+      transform: {
+        cdn: {
+          defaultCacheBehavior: {
+            compress: false,
+          },
+        },
+      },
     });
 
     return {
