@@ -55,6 +55,18 @@ class WorkbenchController extends ChangeNotifier {
 
   final GeminiService _geminiService = GeminiService();
 
+  // Cache the LlmClient so buildClient() returns the *same* instance until the
+  // effective API key changes. Without this cache, every shell rebuild produced
+  // a fresh GeminiApiClient — GenuiForm's didUpdateWidget then saw
+  // `!identical(old.client, widget.client)` and called FormController
+  // .rebuildConfig() on every notifyListeners(), cancelling whatever LLM
+  // stream was in flight. In release mode that storm caused the form preview
+  // to never settle on a step (and never paint a stable frame) until a window
+  // resize forced a full-tree relayout.
+  LlmClient? _cachedClient;
+  String? _cachedClientKey;
+  bool? _cachedClientMock;
+
   WorkbenchController() {
     _parseResult = parseDsl(_dsl);
     _committedParseResult = _parseResult;
@@ -384,11 +396,25 @@ class WorkbenchController extends ChangeNotifier {
   }
 
   LlmClient buildClient() {
-    if (_useMock) return WorkbenchMockLlmClient();
+    if (_useMock) {
+      if (_cachedClient == null || _cachedClientMock != true) {
+        _cachedClient = WorkbenchMockLlmClient();
+        _cachedClientMock = true;
+        _cachedClientKey = null;
+      }
+      return _cachedClient!;
+    }
     final key = _geminiKey.value.isNotEmpty
         ? _geminiKey.value
         : (_geminiService.apiKey ?? '');
-    return GeminiApiClient(apiKey: key);
+    if (_cachedClient == null ||
+        _cachedClientMock != false ||
+        _cachedClientKey != key) {
+      _cachedClient = GeminiApiClient(apiKey: key);
+      _cachedClientMock = false;
+      _cachedClientKey = key;
+    }
+    return _cachedClient!;
   }
   
   @override
