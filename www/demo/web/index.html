@@ -32,112 +32,16 @@
   <title>genuiform</title>
   <link rel="manifest" href="manifest.json">
 
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&display=swap" />
-
   <style>
-    #flutter-splash {
-      position: fixed;
-      inset: 0;
-      background: #131218;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 9999;
-      opacity: 1;
-      transition: opacity 0.65s ease;
-    }
-    #flutter-splash.fade-out {
-      opacity: 0;
-      pointer-events: none;
-    }
-    /* dot grid */
-    #flutter-splash::before {
-      content: "";
-      position: absolute;
-      inset: 0;
-      background-image: radial-gradient(circle, rgba(200, 191, 255, 0.08) 1px, transparent 1px);
-      background-size: 28px 28px;
-      mask-image: radial-gradient(ellipse at 50% 40%, black 30%, transparent 75%);
-      -webkit-mask-image: radial-gradient(ellipse at 50% 40%, black 30%, transparent 75%);
-      pointer-events: none;
-    }
-    /* top violet accent line */
-    #flutter-splash::after {
-      content: "";
-      position: absolute;
-      top: 0; left: 0; right: 0;
-      height: 1px;
-      background: linear-gradient(90deg, transparent 0%, #C8BFFF 20%, #C8BFFF 80%, transparent 100%);
-      opacity: 0.6;
-    }
-    .splash-glow {
-      position: absolute;
-      top: 50%; left: 50%;
-      transform: translate(-50%, -60%);
-      width: 600px; height: 600px;
-      border-radius: 50%;
-      background: radial-gradient(circle, rgba(68, 57, 150, 0.45) 0%, rgba(68, 57, 150, 0.15) 30%, transparent 60%);
-      filter: blur(40px);
-      pointer-events: none;
-      animation: splash-pulse 4s ease-in-out infinite;
-    }
-    @keyframes splash-pulse {
-      0%, 100% { opacity: 0.7; transform: translate(-50%, -60%) scale(1); }
-      50%       { opacity: 1;   transform: translate(-50%, -60%) scale(1.08); }
-    }
-    .splash-content {
-      position: relative;
-      z-index: 1;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 28px;
-    }
-    .splash-wordmark {
-      font-family: 'Space Grotesk', system-ui, sans-serif;
-      font-weight: 700;
-      font-size: 30px;
-      letter-spacing: -0.04em;
-      color: #E6E1E9;
-      line-height: 1;
-    }
-    .splash-wordmark .i {
-      font-style: italic;
-      color: #C8BFFF;
-    }
-    .splash-bar {
-      width: 120px;
-      height: 2px;
-      background: rgba(200, 191, 255, 0.12);
-      border-radius: 999px;
-      overflow: hidden;
-    }
-    .splash-bar::after {
-      content: "";
-      display: block;
+    html, body {
+      margin: 0;
+      padding: 0;
       height: 100%;
-      width: 45%;
-      background: linear-gradient(90deg, transparent, #C8BFFF, transparent);
-      border-radius: 999px;
-      animation: shimmer 1.5s ease-in-out infinite;
-    }
-    @keyframes shimmer {
-      0%   { transform: translateX(-200%); }
-      100% { transform: translateX(400%); }
+      background: #131218;
     }
   </style>
 </head>
 <body>
-  <div id="flutter-splash">
-    <div class="splash-glow"></div>
-    <div class="splash-content">
-      <span class="splash-wordmark">genu<span class="i">i</span>form</span>
-      <div class="splash-bar"></div>
-    </div>
-  </div>
-
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>
