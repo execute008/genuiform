@@ -16,7 +16,7 @@ class GeminiService {
 
   void _initModel(String apiKey) {
     _model = GenerativeModel(
-      model: 'gemini-1.5-pro',
+      model: 'gemini-2.5-pro',
       apiKey: apiKey,
       generationConfig: GenerationConfig(
         temperature: 0.7,

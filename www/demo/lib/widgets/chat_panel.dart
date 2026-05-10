@@ -63,7 +63,7 @@ class _ChatPanelState extends State<ChatPanel> {
       children: [
         SectionHeader(
           title: 'Prompt',
-          chip: const StatusChip(label: 'gemini-1.5-pro'),
+          chip: const StatusChip(label: 'gemini-2.5-pro'),
           trailing: [
             IconButton(
               icon: const Icon(Icons.history, size: 18),
