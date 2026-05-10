@@ -337,12 +337,16 @@ class WorkbenchController extends ChangeNotifier {
   Future<void> sendToAgent(String message) async {
     if (_agentStreaming || message.trim().isEmpty) return;
 
-    // Lazily init agent service
-    if (_agentService == null) {
-      final key = _geminiService.apiKey ?? '';
-      if (key.isEmpty) return;
+    // Lazily init (or reinit if model changed)
+    final selectedModel = _model.value;
+    final key = _geminiKey.value.isNotEmpty
+        ? _geminiKey.value
+        : (_geminiService.apiKey ?? '');
+    if (key.isEmpty) return;
+    if (_agentService == null ||
+        !_agentService!.isInitialisedWith(selectedModel)) {
       _agentService = DslAgentService(apiKey: key);
-      _agentService!.init();
+      _agentService!.init(model: selectedModel);
     }
 
     _agentHistory.add(AgentMessage(role: AgentRole.user, text: message.trim()));

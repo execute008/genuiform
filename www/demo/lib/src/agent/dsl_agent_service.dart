@@ -99,9 +99,12 @@ RULES FOR GENERATING DSL:
 When the user describes a form they want, generate complete DSL. When they ask to modify it, show the full updated DSL (not just a diff). Be concise in prose, verbose only in the DSL block.
 ''';
 
-  void init() {
+  String? _modelName;
+
+  void init({String model = 'gemini-2.5-flash'}) {
+    _modelName = model;
     _model = GenerativeModel(
-      model: 'gemini-2.0-flash',
+      model: model,
       apiKey: _apiKey,
       systemInstruction: Content.system(_systemPrompt),
       generationConfig: GenerationConfig(
@@ -111,6 +114,8 @@ When the user describes a form they want, generate complete DSL. When they ask t
     );
     _session = _model!.startChat();
   }
+
+  bool isInitialisedWith(String model) => _modelName == model && _session != null;
 
   void reset() {
     if (_model != null) {

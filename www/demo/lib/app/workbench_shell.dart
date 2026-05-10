@@ -346,37 +346,35 @@ class _EditorPanel extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: AppSpacing.s3),
-                  if (!showChat) ...[
-                    ValueListenableBuilder<String>(
-                      valueListenable: c.model,
-                      builder: (context, current, _) {
-                        return DropdownButton<String>(
-                          value: current,
-                          underline: const SizedBox.shrink(),
-                          style: TextStyle(fontSize: 13, color: cs.onSurface),
-                          items: WorkbenchController.candidateModels
-                              .map((m) => DropdownMenuItem<String>(
-                                    value: m,
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 8, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: cs.secondaryContainer,
-                                        borderRadius: BorderRadius.circular(4),
-                                      ),
-                                      child: Text(m),
+                  ValueListenableBuilder<String>(
+                    valueListenable: c.model,
+                    builder: (context, current, _) {
+                      return DropdownButton<String>(
+                        value: current,
+                        underline: const SizedBox.shrink(),
+                        style: TextStyle(fontSize: 13, color: cs.onSurface),
+                        items: WorkbenchController.candidateModels
+                            .map((m) => DropdownMenuItem<String>(
+                                  value: m,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: cs.secondaryContainer,
+                                      borderRadius: BorderRadius.circular(4),
                                     ),
-                                  ))
-                              .toList(),
-                          onChanged: (next) {
-                            if (next != null && next != current) {
-                              c.model.value = next;
-                            }
-                          },
-                        );
-                      },
-                    ),
-                  ],
+                                    child: Text(m),
+                                  ),
+                                ))
+                            .toList(),
+                        onChanged: (next) {
+                          if (next != null && next != current) {
+                            c.model.value = next;
+                          }
+                        },
+                      );
+                    },
+                  ),
                   const Spacer(),
                 ],
               ),
