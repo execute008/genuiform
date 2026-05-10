@@ -49,52 +49,42 @@ class _AgentChatPanelState extends State<AgentChatPanel> {
       animation: widget.controller,
       builder: (context, _) {
         final history = widget.controller.agentHistory;
-        if (history.isNotEmpty) {
-          _scrollToBottom();
-        }
-        return _buildPanel(context, history);
+        final streaming = widget.controller.agentStreaming;
+        if (history.isNotEmpty) _scrollToBottom();
+
+        final cs = Theme.of(context).colorScheme;
+
+        return Column(
+          children: [
+            _buildHeader(context, cs),
+            Expanded(
+              child: history.isEmpty && !streaming
+                  ? _buildEmptyState(context, cs)
+                  : _buildMessageList(context, history, streaming, cs),
+            ),
+            _buildInputBar(context, cs, streaming),
+          ],
+        );
       },
-    );
-  }
-
-  Widget _buildPanel(BuildContext context, List<AgentMessage> history) {
-    final cs = Theme.of(context).colorScheme;
-
-    return Container(
-      color: cs.surfaceContainerLowest,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _buildHeader(context, cs),
-          const Divider(height: 1),
-          Expanded(
-            child: history.isEmpty
-                ? _buildEmptyState(context, cs)
-                : _buildMessageList(context, history, cs),
-          ),
-          const Divider(height: 1),
-          _buildInputBar(context, cs),
-        ],
-      ),
     );
   }
 
   Widget _buildHeader(BuildContext context, ColorScheme cs) {
     return Container(
-      height: 56,
+      height: 48,
       padding: const EdgeInsets.symmetric(horizontal: AppSpacing.s4),
       decoration: BoxDecoration(
-        color: cs.surfaceContainerLow,
+        color: cs.surfaceContainerHighest,
         border: Border(bottom: BorderSide(color: cs.outlineVariant)),
       ),
       child: Row(
         children: [
-          Icon(Icons.smart_toy, size: 18, color: cs.primary),
+          _AgentAvatar(cs: cs),
           const SizedBox(width: AppSpacing.s2),
           Text(
             'DSL Agent',
             style: TextStyle(
-              fontSize: 14,
+              fontSize: 13,
               fontWeight: FontWeight.w600,
               color: cs.onSurface,
             ),
@@ -103,7 +93,7 @@ class _AgentChatPanelState extends State<AgentChatPanel> {
           IconButton(
             tooltip: 'New chat',
             onPressed: widget.controller.resetAgentChat,
-            icon: const Icon(Icons.refresh, size: 18),
+            icon: const Icon(Icons.refresh, size: 16),
             visualDensity: VisualDensity.compact,
             padding: const EdgeInsets.all(6),
             constraints: const BoxConstraints(),
@@ -117,91 +107,140 @@ class _AgentChatPanelState extends State<AgentChatPanel> {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(AppSpacing.s6),
-        child: Text(
-          'Describe the form you want to build.',
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            fontSize: 14,
-            color: cs.onSurfaceVariant,
-          ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _AgentAvatar(cs: cs, size: 44),
+            const SizedBox(height: AppSpacing.s4),
+            Text(
+              'Describe the form you want to build.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 14,
+                color: cs.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.s2),
+            Text(
+              'The agent knows the full DSL syntax and will generate ready-to-run code.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 12,
+                color: cs.onSurfaceVariant.withValues(alpha: 0.7),
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildMessageList(
-      BuildContext context, List<AgentMessage> history, ColorScheme cs) {
-    return ListView.builder(
+  Widget _buildMessageList(BuildContext context, List<AgentMessage> history,
+      bool streaming, ColorScheme cs) {
+    final showStreamingBubble =
+        streaming && (history.isEmpty || !history.last.isStreaming);
+
+    return ListView.separated(
       controller: _scrollController,
-      padding: const EdgeInsets.symmetric(
-          vertical: AppSpacing.s3, horizontal: AppSpacing.s3),
-      itemCount: history.length,
-      itemBuilder: (context, index) {
-        final message = history[index];
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.s5,
+        AppSpacing.s5,
+        AppSpacing.s5,
+        AppSpacing.s3,
+      ),
+      itemCount: history.length + (showStreamingBubble ? 1 : 0),
+      separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.s4),
+      itemBuilder: (context, i) {
+        if (i == history.length && showStreamingBubble) {
+          return const _StreamingBubble();
+        }
         return _MessageBubble(
-          message: message,
+          message: history[i],
           onApplyDsl: widget.controller.applyAgentDsl,
         );
       },
     );
   }
 
-  Widget _buildInputBar(BuildContext context, ColorScheme cs) {
-    final streaming = widget.controller.agentStreaming;
-    return Container(
-      padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.s3, vertical: AppSpacing.s2),
-      color: cs.surfaceContainerLow,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          Expanded(
-            child: TextField(
-              controller: _inputController,
-              minLines: 1,
-              maxLines: 4,
-              textInputAction: TextInputAction.send,
-              enabled: !streaming,
-              decoration: InputDecoration(
-                hintText: 'Ask about the DSL...',
-                hintStyle: TextStyle(color: cs.onSurfaceVariant, fontSize: 13),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide(color: cs.outlineVariant),
+  Widget _buildInputBar(
+      BuildContext context, ColorScheme cs, bool streaming) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.s5,
+        AppSpacing.s2,
+        AppSpacing.s5,
+        AppSpacing.s5,
+      ),
+      child: Container(
+        decoration: BoxDecoration(
+          color: cs.surfaceContainerHigh,
+          borderRadius: BorderRadius.circular(AppSpacing.rXl),
+          border: Border.all(color: cs.outlineVariant),
+        ),
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.s4,
+          AppSpacing.s2,
+          AppSpacing.s2,
+          AppSpacing.s2,
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _inputController,
+                minLines: 1,
+                maxLines: 5,
+                enabled: !streaming,
+                onSubmitted: (_) => _sendMessage(),
+                decoration: InputDecoration(
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  contentPadding:
+                      const EdgeInsets.symmetric(vertical: AppSpacing.s2),
+                  hintText:
+                      'Describe the form you want — e.g. "3-step onboarding…"',
+                  hintStyle: TextStyle(
+                    color: cs.onSurfaceVariant,
+                    fontSize: 13,
+                  ),
                 ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide(color: cs.outlineVariant),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide(color: cs.primary),
-                ),
-                contentPadding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.s3, vertical: AppSpacing.s2),
-                isDense: true,
+                style: const TextStyle(fontSize: 13),
               ),
-              style: const TextStyle(fontSize: 13),
-              onSubmitted: (_) => _sendMessage(),
             ),
-          ),
-          const SizedBox(width: AppSpacing.s2),
-          IconButton(
-            tooltip: 'Send',
-            onPressed: streaming ? null : _sendMessage,
-            icon: streaming
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.send, size: 18),
-          ),
-        ],
+            Material(
+              color: streaming ? cs.onSurface.withValues(alpha: 0.12) : cs.primary,
+              shape: const CircleBorder(),
+              child: InkWell(
+                customBorder: const CircleBorder(),
+                onTap: streaming ? null : _sendMessage,
+                child: SizedBox(
+                  width: 36,
+                  height: 36,
+                  child: streaming
+                      ? Center(
+                          child: SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: cs.onSurface.withValues(alpha: 0.38),
+                            ),
+                          ),
+                        )
+                      : Icon(Icons.arrow_upward, size: 18, color: cs.onPrimary),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 }
+
+// ── Message bubble ────────────────────────────────────────────────────────────
 
 class _MessageBubble extends StatelessWidget {
   const _MessageBubble({
@@ -217,135 +256,197 @@ class _MessageBubble extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     final isUser = message.role == AgentRole.user;
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: AppSpacing.s1),
-      child: Column(
-        crossAxisAlignment:
-            isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment:
-                isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
-            crossAxisAlignment: CrossAxisAlignment.end,
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _avatar(isUser, cs),
+        const SizedBox(width: AppSpacing.s3),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (!isUser) ...[
-                CircleAvatar(
-                  radius: 12,
-                  backgroundColor: cs.primaryContainer,
-                  child: Icon(Icons.smart_toy,
-                      size: 14, color: cs.onPrimaryContainer),
+              Text(
+                isUser ? 'You' : 'DSL Agent',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: cs.onSurfaceVariant,
+                  letterSpacing: 0.4,
                 ),
-                const SizedBox(width: AppSpacing.s1),
-              ],
-              Flexible(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: AppSpacing.s3, vertical: AppSpacing.s2),
-                  decoration: BoxDecoration(
-                    color: isUser
-                        ? cs.primaryContainer
-                        : cs.surfaceContainerHigh,
-                    borderRadius: BorderRadius.only(
-                      topLeft: const Radius.circular(12),
-                      topRight: const Radius.circular(12),
-                      bottomLeft: Radius.circular(isUser ? 12 : 2),
-                      bottomRight: Radius.circular(isUser ? 2 : 12),
+              ),
+              const SizedBox(height: 2),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.s4,
+                  vertical: AppSpacing.s3,
+                ),
+                decoration: BoxDecoration(
+                  color: isUser ? cs.primaryContainer : cs.surfaceContainer,
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(AppSpacing.rXs),
+                    topRight: Radius.circular(AppSpacing.rL),
+                    bottomLeft: Radius.circular(AppSpacing.rL),
+                    bottomRight: Radius.circular(AppSpacing.rL),
+                  ),
+                ),
+                child: SelectableText(
+                  message.text,
+                  style: TextStyle(
+                    fontSize: 13,
+                    height: 1.5,
+                    color: isUser ? cs.onPrimaryContainer : cs.onSurface,
+                  ),
+                ),
+              ),
+              if (!isUser && message.extractedDsl != null && !message.isStreaming)
+                Padding(
+                  padding: const EdgeInsets.only(top: AppSpacing.s2),
+                  child: FilledButton.icon(
+                    onPressed: () => onApplyDsl(message.extractedDsl!),
+                    icon: const Icon(Icons.check, size: 14),
+                    label: const Text('Apply DSL',
+                        style: TextStyle(fontSize: 12)),
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: AppSpacing.s3, vertical: AppSpacing.s1),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
                   ),
-                  child: message.isStreaming && message.text.isEmpty
-                      ? _StreamingIndicator()
-                      : SelectableText(
-                          message.text,
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: isUser
-                                ? cs.onPrimaryContainer
-                                : cs.onSurface,
-                            height: 1.5,
-                          ),
-                        ),
                 ),
-              ),
-              if (isUser) ...[
-                const SizedBox(width: AppSpacing.s1),
-                CircleAvatar(
-                  radius: 12,
-                  backgroundColor: cs.secondaryContainer,
-                  child: Icon(Icons.person,
-                      size: 14, color: cs.onSecondaryContainer),
-                ),
-              ],
             ],
           ),
-          if (!isUser && message.isStreaming && message.text.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(left: 28, top: 4),
-              child: _StreamingIndicator(),
-            ),
-          if (!isUser && message.extractedDsl != null)
-            Padding(
-              padding: const EdgeInsets.only(left: 28, top: AppSpacing.s1),
-              child: FilledButton.icon(
-                onPressed: () => onApplyDsl(message.extractedDsl!),
-                icon: const Icon(Icons.check, size: 14),
-                label: const Text('Apply DSL', style: TextStyle(fontSize: 12)),
-                style: FilledButton.styleFrom(
-                  backgroundColor: Colors.teal,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: AppSpacing.s3, vertical: AppSpacing.s1),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-              ),
-            ),
-        ],
+        ),
+      ],
+    );
+  }
+
+  Widget _avatar(bool isUser, ColorScheme cs) {
+    if (isUser) {
+      return Container(
+        width: 28,
+        height: 28,
+        margin: const EdgeInsets.only(top: 2),
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: cs.secondaryContainer,
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          'YO',
+          style: TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+            color: cs.onSecondaryContainer,
+          ),
+        ),
+      );
+    }
+    return _AgentAvatar(cs: cs);
+  }
+}
+
+// ── Agent avatar (gradient ✦) ─────────────────────────────────────────────────
+
+class _AgentAvatar extends StatelessWidget {
+  const _AgentAvatar({required this.cs, this.size = 28});
+
+  final ColorScheme cs;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      margin: const EdgeInsets.only(top: 2),
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: LinearGradient(
+          colors: [cs.tertiary, cs.primary],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        '✦',
+        style: TextStyle(
+          fontSize: size * 0.43,
+          color: cs.onPrimary,
+        ),
       ),
     );
   }
 }
 
-class _StreamingIndicator extends StatefulWidget {
+// ── Streaming bubble (three animated dots) ────────────────────────────────────
+
+class _StreamingBubble extends StatefulWidget {
+  const _StreamingBubble();
+
   @override
-  State<_StreamingIndicator> createState() => _StreamingIndicatorState();
+  State<_StreamingBubble> createState() => _StreamingBubbleState();
 }
 
-class _StreamingIndicatorState extends State<_StreamingIndicator>
+class _StreamingBubbleState extends State<_StreamingBubble>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _animController;
-  late final Animation<double> _opacityAnimation;
-
-  @override
-  void initState() {
-    super.initState();
-    _animController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 600),
-    )..repeat(reverse: true);
-    _opacityAnimation =
-        Tween<double>(begin: 0.3, end: 1.0).animate(_animController);
-  }
+  late final AnimationController _ctrl =
+      AnimationController(
+          vsync: this, duration: const Duration(milliseconds: 1200))
+        ..repeat();
 
   @override
   void dispose() {
-    _animController.dispose();
+    _ctrl.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return FadeTransition(
-      opacity: _opacityAnimation,
-      child: SizedBox(
-        width: 14,
-        height: 14,
-        child: CircularProgressIndicator(
-          strokeWidth: 2,
-          valueColor: AlwaysStoppedAnimation<Color>(
-            Theme.of(context).colorScheme.primary,
-          ),
+    final cs = Theme.of(context).colorScheme;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _AgentAvatar(cs: cs),
+        const SizedBox(width: AppSpacing.s3),
+        Row(
+          children: [
+            AnimatedBuilder(
+              animation: _ctrl,
+              builder: (_, __) {
+                return Row(
+                  children: List.generate(3, (i) {
+                    final phase = ((_ctrl.value + i * 0.15) % 1.0);
+                    final opacity = 0.3 +
+                        0.7 *
+                            (1 - (phase - 0.5).abs() * 2).clamp(0.0, 1.0);
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 1.5),
+                      child: Container(
+                        width: 4,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: cs.primary.withValues(alpha: opacity),
+                        ),
+                      ),
+                    );
+                  }),
+                );
+              },
+            ),
+            const SizedBox(width: AppSpacing.s2),
+            Text(
+              'Thinking…',
+              style: TextStyle(
+                fontSize: 13,
+                fontStyle: FontStyle.italic,
+                color: cs.onSurfaceVariant,
+              ),
+            ),
+          ],
         ),
-      ),
+      ],
     );
   }
 }
