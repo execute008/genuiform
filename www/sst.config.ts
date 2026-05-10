@@ -38,10 +38,13 @@ export default $config({
       // browser still gets correct bytes (md5 verified) and rebuilds
       // pump fine.
       transform: {
-        cdn: {
-          defaultCacheBehavior: {
-            compress: false,
-          },
+        cdn: (args) => {
+          // Mutate-in-place so we keep SST's defaults (allowedMethods,
+          // cachedMethods, cachePolicyId, functionAssociations, etc.) and
+          // only flip compress -> false.
+          if ((args as any).defaultCacheBehavior) {
+            (args as any).defaultCacheBehavior.compress = false;
+          }
         },
       },
     });
