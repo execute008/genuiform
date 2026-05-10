@@ -44,3 +44,4 @@ lcov.info
 a2ui/build
 www/.sst
 www/landing/dist
+www/video/node_modules
