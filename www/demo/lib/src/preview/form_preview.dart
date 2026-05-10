@@ -36,6 +36,7 @@ class FormPreview extends StatefulWidget {
     this.onRestartRequested,
     this.emitter,
     this.onControllerCreated,
+    this.scenarioId,
     super.key,
   });
 
@@ -83,6 +84,10 @@ class FormPreview extends StatefulWidget {
   /// hold a reference to the active [FormController] for the progress drawer
   /// without duplicating the inner [GenuiForm] state.
   final void Function(FormController)? onControllerCreated;
+
+  /// Optional scenario key forwarded to [GenuiForm.scenarioId] for the
+  /// per-scenario animated SVG mascot below the "Next" button.
+  final String? scenarioId;
 
   @override
   State<FormPreview> createState() => _FormPreviewState();
@@ -266,6 +271,7 @@ class _FormPreviewState extends State<FormPreview>
                     ),
                   );
               },
+              scenarioId: widget.scenarioId,
             ),
           ),
           ValueListenableBuilder<FormController?>(

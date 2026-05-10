@@ -104,6 +104,7 @@ class _WorkbenchShellState extends State<WorkbenchShell> {
           ),
         ),
         onControllerCreated: (c) => _controller.controllerRef.value = c,
+        scenarioId: _controller.currentScenarioId,
       ),
     );
   }

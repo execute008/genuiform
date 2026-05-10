@@ -1,4 +1,7 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
 import '../models/constraints.dart';
 import '../models/contract.dart';
@@ -9,6 +12,7 @@ import '../models/quiz_input_type.dart';
 import '../models/session.dart';
 import '../models/session_status.dart';
 import '../models/step_event.dart';
+import '../llm/gemini_api_client.dart';
 import '../llm/llm_client.dart';
 import '../runtime/outcome_navigator.dart';
 import '../strategies/form_config.dart';
@@ -64,6 +68,7 @@ class GenuiForm extends StatefulWidget {
     this.onEscalation,
     this.onError,
     this.onControllerCreated,
+    this.scenarioId,
     super.key,
   });
 
@@ -109,19 +114,42 @@ class GenuiForm extends StatefulWidget {
   /// [FormController.dispose] on it.
   final void Function(FormController controller)? onControllerCreated;
 
+  /// Optional scenario key used to drive the per-scenario animated SVG mascot
+  /// rendered below the "Next" button. When non-null and [client] is a
+  /// [GeminiApiClient], a fresh mascot is requested on initial mount and on
+  /// every "Next" press. When null (or when [client] is a mock), no mascot is
+  /// rendered.
+  final String? scenarioId;
+
   @override
   State<GenuiForm> createState() => _GenuiFormState();
 }
 
-class _GenuiFormState extends State<GenuiForm> {
+class _GenuiFormState extends State<GenuiForm>
+    with SingleTickerProviderStateMixin {
   late FormController _controller;
   dynamic _currentValue;
   StepEvent? _lastEvent;
+  String _mascotSvg = '';
+  bool _mascotLoading = false;
+
+  /// Drives the bob (vertical bounce) animation for the mascot. flutter_svg
+  /// does not execute CSS animations baked into the SVG itself, so the bob
+  /// is applied Flutter-side via Transform.translate.
+  late final AnimationController _bobController;
 
   @override
   void initState() {
     super.initState();
+    _bobController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    )..repeat();
     _initController();
+    final scenarioId = widget.scenarioId;
+    if (scenarioId != null) {
+      _regenerateMascot(scenarioId);
+    }
   }
 
   void _initController() {
@@ -219,6 +247,7 @@ class _GenuiFormState extends State<GenuiForm> {
 
   @override
   void dispose() {
+    _bobController.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -227,6 +256,81 @@ class _GenuiFormState extends State<GenuiForm> {
     final step = _controller.currentStep;
     if (step == null) return;
     _controller.submitAnswer(_currentValue);
+
+    final scenarioId = widget.scenarioId;
+    if (scenarioId != null) {
+      _regenerateMascot(scenarioId);
+    }
+  }
+
+  Future<void> _regenerateMascot(String scenarioKey) async {
+    final client = widget.client;
+    if (client is! GeminiApiClient) {
+      debugPrint(
+        'GenuiForm: skipping mascot — client is ${client.runtimeType}, '
+        'not GeminiApiClient.',
+      );
+      return;
+    }
+
+    setState(() => _mascotLoading = true);
+
+    try {
+      final svg = await client.generateMascotSvg(scenarioKey);
+      if (!mounted) return;
+      debugPrint(
+        'GenuiForm: mascot for "$scenarioKey" — '
+        '${svg.isEmpty ? "EMPTY (keeping previous)" : "${svg.length} chars"}',
+      );
+      setState(() {
+        // If the new fetch failed (timeout, no SVG block), keep the previous
+        // mascot rather than blanking it. A missing mascot is worse UX than
+        // a slightly stale one.
+        if (svg.isNotEmpty) _mascotSvg = svg;
+        _mascotLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      debugPrint('GenuiForm._regenerateMascot error: $e — keeping previous');
+      setState(() => _mascotLoading = false);
+    }
+  }
+
+  Widget _buildMascot() {
+    // Show the spinner only on first load (no mascot to display yet). When
+    // refreshing, keep the existing mascot visible so it doesn't flash out.
+    if (_mascotLoading && _mascotSvg.isEmpty) {
+      return const Center(
+        child: SizedBox(
+          width: 24,
+          height: 24,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+      );
+    }
+    if (_mascotSvg.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    // Animate vertical bob via Flutter (flutter_svg ignores any <style> /
+    // @keyframes embedded in the SVG itself).
+    return AnimatedBuilder(
+      key: ValueKey(_mascotSvg.hashCode),
+      animation: _bobController,
+      builder: (context, child) {
+        final dy = -6.0 * math.sin(_bobController.value * 2 * math.pi);
+        return Transform.translate(
+          offset: Offset(0, dy),
+          child: child,
+        );
+      },
+      child: SvgPicture.string(
+        _mascotSvg,
+        width: 120,
+        height: 120,
+        fit: BoxFit.contain,
+      ),
+    );
   }
 
   void _retry() {
@@ -337,11 +441,26 @@ class _GenuiFormState extends State<GenuiForm> {
           // button is the sole CTA and already submits.
           if (currentStep != null &&
               !isAwaiting &&
-              currentStep.inputType != QuizInputType.noneJustInformation)
-            FilledButton(
-              onPressed: _submitAnswer,
-              child: const Text('Next'),
+              currentStep.inputType != QuizInputType.noneJustInformation) ...[
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: FilledButton(
+                onPressed: _submitAnswer,
+                child: const Text('Next'),
+              ),
             ),
+            const SizedBox(height: 12),
+            Center(
+              child: SizedBox(
+                width: 120,
+                height: 120,
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 300),
+                  child: _buildMascot(),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );

@@ -357,4 +357,165 @@ class GeminiApiClient extends LlmClient {
       print('GeminiApiClient: deleteCachedContent "$name" failed: $e — ignored.');
     }
   }
+
+  /// Generates a tiny, scenario-themed SVG mascot via a one-shot call to
+  /// `gemini-2.5-flash:generateContent`. Returns the raw `<svg>...</svg>`
+  /// string on success, or `''` on any failure (network, bad response,
+  /// no extractable SVG block).
+  ///
+  /// The returned SVG is **static** — flutter_svg does not execute CSS
+  /// animations, so any motion is applied Flutter-side via a Transform
+  /// wrapper. The prompt explicitly forbids `<style>` / `<animate>` tags.
+  ///
+  /// Failures are logged with `print()` so the cause is visible in the
+  /// browser DevTools console — silent emptiness is hard to debug.
+  Future<String> generateMascotSvg(String scenarioKey) async {
+    // Per-call nonce defeats Gemini's response cache so each press of "Next"
+    // gets a fresh design instead of the same mascot in different rotations.
+    final nonce = DateTime.now().microsecondsSinceEpoch % 1000000;
+
+    final prompt = '''
+Generate a tiny SVG mascot character. Theme: $scenarioKey
+Variation seed: $nonce — use this to pick a unique pose, expression, and accent-color combo. Different seed must produce a visibly different mascot.
+
+Themes and what to draw:
+- lead_qualification = a small suited businessman with a briefcase, confident pose
+- gymgeist_onboarding = a tiny athlete holding a dumbbell or lightning bolt
+- newsletter_signup = a friendly envelope character with eyes
+- medical_intake = a small doctor with a stethoscope or red cross
+
+STRICT OUTPUT RULES — read carefully:
+- Return ONLY valid SVG. No markdown fences, no prose, no backticks.
+- Start with <svg and end with </svg>. Closing </svg> is REQUIRED.
+- Output MUST be under 1200 characters total. Simplify if approaching the limit.
+- Use AT MOST 12 shape elements total. Prefer circle / rect / ellipse over <path>.
+- Root attributes: viewBox="0 0 120 120" width="120" height="120" xmlns="http://www.w3.org/2000/svg"
+
+ABSOLUTELY FORBIDDEN — these break the renderer:
+- NO <style> blocks. NO CSS. NO @keyframes. NO class="..." attributes.
+- NO <animate>, <animateTransform>, <animateMotion> tags.
+- NO <text>, <image>, <use href>, external href / xlink:href references.
+- NO comments. NO XML processing instructions. NO DOCTYPE.
+
+VISUAL RULES:
+- Colors only from: #C8BFFF #ECB8CD #443996 #E6E1E9 #9FD4A3 #FFD89C
+- The mascot sits on a DARK background. Light/bright fills only — at least 70% of the visible area must use #C8BFFF / #ECB8CD / #E6E1E9 / #9FD4A3 / #FFD89C. #443996 is OK only as accent strokes.
+- Use the `fill="#..."` attribute directly on each shape (no CSS selectors).
+
+OUTPUT SHAPE: just `<svg ...>` then 8-12 shape elements then `</svg>`. Nothing else.
+''';
+
+    try {
+      final uri = Uri.parse(
+        '$_baseUrl/models/gemini-2.5-flash:generateContent',
+      );
+
+      final requestBody = jsonEncode({
+        'contents': [
+          {
+            'role': 'user',
+            'parts': [
+              {'text': prompt},
+            ],
+          },
+        ],
+        'generationConfig': {
+          'temperature': 1.0,
+          'maxOutputTokens': 4096,
+        },
+      });
+
+      final response = await _httpClient
+          .post(
+            uri,
+            headers: {
+              'x-goog-api-key': apiKey,
+              'Content-Type': 'application/json',
+            },
+            body: requestBody,
+          )
+          .timeout(const Duration(seconds: 30));
+
+      if (response.statusCode != 200) {
+        final preview = response.body.substring(
+          0,
+          response.body.length.clamp(0, 400),
+        );
+        // ignore: avoid_print
+        print(
+          'GeminiApiClient.generateMascotSvg: HTTP ${response.statusCode} '
+          '— body: $preview',
+        );
+        return '';
+      }
+
+      final json = jsonDecode(response.body) as Map<String, dynamic>;
+      final candidates = json['candidates'] as List<dynamic>?;
+      if (candidates == null || candidates.isEmpty) {
+        // ignore: avoid_print
+        print(
+          'GeminiApiClient.generateMascotSvg: no candidates — body: '
+          '${response.body}',
+        );
+        return '';
+      }
+
+      final content = (candidates[0] as Map<String, dynamic>)['content']
+          as Map<String, dynamic>?;
+      final parts = content?['parts'] as List<dynamic>?;
+      if (parts == null || parts.isEmpty) {
+        // ignore: avoid_print
+        print(
+          'GeminiApiClient.generateMascotSvg: no parts (likely MAX_TOKENS '
+          'or safety) — candidate: ${candidates[0]}',
+        );
+        return '';
+      }
+
+      final text = (parts[0] as Map<String, dynamic>)['text'] as String?;
+      if (text == null || text.isEmpty) return '';
+
+      // Extract <svg ... </svg> from anywhere in the response. Gemini often
+      // wraps SVG in ```svg ... ``` fences or leads with prose; a strict
+      // startsWith/endsWith check rejects those silently.
+      final match = RegExp(
+        r'<svg[\s\S]*?</svg>',
+        caseSensitive: false,
+      ).firstMatch(text);
+      if (match != null) return match.group(0)!;
+
+      // Salvage path: model started an <svg> but ran out of tokens before
+      // closing it (MAX_TOKENS mid-stream). Take from the opening tag, trim
+      // any half-finished trailing element by keeping only up to the last
+      // complete `>` character, and append `</svg>`. Better a possibly-ugly
+      // mascot than nothing.
+      final openIdx = text.toLowerCase().indexOf('<svg');
+      if (openIdx >= 0) {
+        var partial = text.substring(openIdx);
+        final lastClose = partial.lastIndexOf('>');
+        if (lastClose >= 0) {
+          partial = partial.substring(0, lastClose + 1);
+          final salvaged = '$partial</svg>';
+          // ignore: avoid_print
+          print(
+            'GeminiApiClient.generateMascotSvg: salvaged truncated SVG '
+            '(${salvaged.length} chars; raw was ${text.length}, no </svg>).',
+          );
+          return salvaged;
+        }
+      }
+
+      final preview = text.substring(0, text.length.clamp(0, 1500));
+      // ignore: avoid_print
+      print(
+        'GeminiApiClient.generateMascotSvg: no <svg> block in response '
+        '(text length ${text.length}) — raw text: $preview',
+      );
+      return '';
+    } catch (e, st) {
+      // ignore: avoid_print
+      print('GeminiApiClient.generateMascotSvg: $e\n$st');
+      return '';
+    }
+  }
 }
