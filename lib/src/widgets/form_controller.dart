@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
+
 import '../models/answer.dart';
 import '../models/engagement_signal.dart';
 import '../models/quiz_step_spec.dart';
@@ -62,12 +64,26 @@ class FormController {
   final _sessionsCtrl = StreamController<Session>.broadcast();
   final _eventsCtrl = StreamController<StepEvent>.broadcast();
 
+  // Mirrors `_sessionsCtrl` as a synchronous Listenable. Flutter web release
+  // builds have an engine-side bug where `StreamBuilder` rebuilds in the main
+  // render tree don't paint until a real window-resize fires platform metrics
+  // (see github.com/flutter/flutter/issues/186317). `ValueListenableBuilder`
+  // sits on a different rebuild path that does paint reliably, so widgets
+  // bound to this notifier render without needing the workaround.
+  late final ValueNotifier<Session> _sessionNotifier =
+      ValueNotifier<Session>(_session);
+
   final _engagementReader = EngagementReader();
 
   // ── Public API ─────────────────────────────────────────────────────────────
 
   /// Broadcast stream of [Session] snapshots — emits after each turn.
   Stream<Session> get sessions => _sessionsCtrl.stream;
+
+  /// Synchronous [ValueListenable] that mirrors [sessions]. Prefer this for
+  /// widgets in the main render tree under Flutter web release builds, where
+  /// [StreamBuilder] rebuilds suffer from flutter#186317.
+  ValueListenable<Session> get sessionListenable => _sessionNotifier;
 
   /// Broadcast stream of raw [StepEvent]s from the strategy.
   Stream<StepEvent> get events => _eventsCtrl.stream;
@@ -88,7 +104,7 @@ class FormController {
   /// [Session]. The strategy will emit the first [StepReady] event.
   Future<void> start() async {
     _session = _buildInitialSession();
-    _sessionsCtrl.add(_session);
+    _emitSession();
     await _warmCache();
     await _runStrategyLoop();
   }
@@ -311,6 +327,7 @@ class FormController {
     _dropCache();
     await _sessionsCtrl.close();
     await _eventsCtrl.close();
+    _sessionNotifier.dispose();
   }
 
   // ── Cache helpers ───────────────────────────────────────────────────────────
@@ -518,6 +535,7 @@ class FormController {
   void _emitSession() {
     if (!_disposed) {
       _sessionsCtrl.add(_session);
+      _sessionNotifier.value = _session;
     }
   }
 

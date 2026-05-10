@@ -366,13 +366,14 @@ class _GenuiFormState extends State<GenuiForm>
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<Session>(
-      stream: _controller.sessions,
-      initialData: _controller.currentSession,
-      builder: (context, snapshot) {
-        final session = snapshot.data ?? _controller.currentSession;
-        return _buildBody(context, session);
-      },
+    // ValueListenableBuilder instead of StreamBuilder: under Flutter web
+    // release builds, StreamBuilder rebuilds in the main render tree don't
+    // paint until a real window-resize fires platform metrics (engine bug,
+    // github.com/flutter/flutter/issues/186317). The ValueListenable path
+    // dispatches through a different rebuild route that paints reliably.
+    return ValueListenableBuilder<Session>(
+      valueListenable: _controller.sessionListenable,
+      builder: (context, session, _) => _buildBody(context, session),
     );
   }
 
