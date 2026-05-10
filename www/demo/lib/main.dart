@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'theme/app_theme.dart';
@@ -13,6 +16,24 @@ Future<void> main() async {
   // guarantees the first frame paints with the real typography.
   await GoogleFonts.pendingFonts([GoogleFonts.robotoFlex()]);
   runApp(const GenUIFormApp());
+
+  // Frame heartbeat for Flutter web release builds. After the first paint the
+  // engine can stop pumping animation frames automatically, so subsequent
+  // setState() / StreamBuilder rebuilds queue up but never paint until an
+  // external event (e.g. window resize) wakes it. This was confirmed in
+  // production by dispatching a synthetic `resize` event with no actual size
+  // change — the deferred form render painted instantly. Pumping a forced
+  // frame every 200ms for the first 12s covers the cold-load window where
+  // async work (LLM streaming, mascot SVG fetch) lands and needs to render.
+  var ticks = 0;
+  Timer.periodic(const Duration(milliseconds: 200), (timer) {
+    ticks++;
+    if (ticks > 60) {
+      timer.cancel();
+      return;
+    }
+    SchedulerBinding.instance.scheduleFrame();
+  });
 }
 
 class GenUIFormApp extends StatelessWidget {
