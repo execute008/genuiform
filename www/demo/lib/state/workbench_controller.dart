@@ -38,7 +38,8 @@ class WorkbenchController extends ChangeNotifier {
 
   late final ValueNotifier<String> _geminiKey;
   late final ValueNotifier<String> _model;
-  
+  late final ValueNotifier<double> _temperature;
+
   // Form controller reference for progress drawer
   final ValueNotifier<FormController?> controllerRef = ValueNotifier<FormController?>(null);
   
@@ -72,6 +73,7 @@ class WorkbenchController extends ChangeNotifier {
   ParseResult get committedParseResult => _committedParseResult;
   int get formKey => _formKey;
   ValueNotifier<String> get model => _model;
+  ValueNotifier<double> get temperature => _temperature;
   
   bool get hasGemini => _geminiKey.value.isNotEmpty || _geminiService.hasApiKey;
   
@@ -132,6 +134,7 @@ class WorkbenchController extends ChangeNotifier {
     // Initialize LLM client configuration
     _geminiKey = ValueNotifier(_envGeminiKey);
     _model = ValueNotifier(_initialModel);
+    _temperature = ValueNotifier(0.7);
     
     // Initialize DSL with first scenario
     _dsl = kScenarios.first.dsl;
@@ -320,6 +323,7 @@ class WorkbenchController extends ChangeNotifier {
     _commitDebounce?.cancel();
     _geminiKey.dispose();
     _model.dispose();
+    _temperature.dispose();
     super.dispose();
   }
 }

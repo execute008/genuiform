@@ -31,6 +31,7 @@ class FormPreview extends StatefulWidget {
     required this.outcomes,
     required this.client,
     required this.model,
+    this.temperature = 0.7,
     this.handoffMap = const {},
     this.onRestartRequested,
     this.emitter,
@@ -55,6 +56,9 @@ class FormPreview extends StatefulWidget {
 
   /// The Vertex AI model string.
   final String model;
+
+  /// Sampling temperature forwarded to [GenuiForm]. Defaults to `0.7`.
+  final double temperature;
 
   /// Side-table mapping each Outcome.id to its [SimulatedHandoff].
   /// Used to show a handoff toast when [GenuiForm.onComplete] fires.
@@ -237,6 +241,7 @@ class _FormPreviewState extends State<FormPreview>
               outcomes: widget.outcomes,
               client: widget.client,
               model: widget.model,
+              temperature: widget.temperature,
               onControllerCreated: (c) {
                 _controller.value = c;
                 widget.onControllerCreated?.call(c);

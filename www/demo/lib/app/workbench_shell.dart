@@ -90,6 +90,7 @@ class _WorkbenchShellState extends State<WorkbenchShell> {
         outcomes: _controller.committedParseResult.outcomes!,
         client: _controller.buildClient(),
         model: _controller.model.value,
+        temperature: _controller.temperature.value,
         handoffMap: _controller.committedParseResult.handoffMap ?? const {},
         onRestartRequested: _controller.runOrReset,
         emitter: A2uiOutcomeEmitter(
@@ -219,6 +220,8 @@ class _TopBar extends StatelessWidget {
           const SizedBox(width: AppSpacing.s4),
 
           const Spacer(),
+          _TemperatureSlider(notifier: controller.temperature),
+          const SizedBox(width: AppSpacing.s3),
           IconButton(
             tooltip: 'Contract progress',
             onPressed: () {
@@ -516,6 +519,62 @@ class _ParseStatusFooter extends StatelessWidget {
           ],
         ],
       ),
+    );
+  }
+}
+
+// ── Temperature slider ────────────────────────────────────────────────────────
+
+class _TemperatureSlider extends StatelessWidget {
+  const _TemperatureSlider({required this.notifier});
+
+  final ValueNotifier<double> notifier;
+
+  static const double _min = 0.0;
+  static const double _max = 2.0;
+  static const int _divisions = 20;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return ValueListenableBuilder<double>(
+      valueListenable: notifier,
+      builder: (context, current, _) {
+        return Tooltip(
+          message: 'Sampling temperature (${current.toStringAsFixed(1)}). '
+              'Applies to form generation.',
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'T ${current.toStringAsFixed(1)}',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+              SizedBox(
+                width: 120,
+                child: SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    trackHeight: 2,
+                    thumbShape:
+                        const RoundSliderThumbShape(enabledThumbRadius: 6),
+                    overlayShape:
+                        const RoundSliderOverlayShape(overlayRadius: 12),
+                  ),
+                  child: Slider(
+                    value: current.clamp(_min, _max),
+                    min: _min,
+                    max: _max,
+                    divisions: _divisions,
+                    onChanged: (next) => notifier.value = next,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
