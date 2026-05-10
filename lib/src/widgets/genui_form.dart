@@ -10,7 +10,6 @@ import '../models/session.dart';
 import '../models/session_status.dart';
 import '../models/step_event.dart';
 import '../llm/llm_client.dart';
-import '../runtime/outcome_navigator.dart';
 import '../strategies/form_config.dart';
 import '../strategies/generative_strategy.dart';
 import '../strategies/strategy.dart';
@@ -242,9 +241,13 @@ class _GenuiFormState extends State<GenuiForm> {
   }
 
   /// Computes progress: filled required fields / total required fields.
+  ///
+  /// ⚡ BOLT OPTIMIZATION: Use the pre-computed runningContract from the
+  /// session instead of re-walking the tree with OutcomeNavigator.
+  /// This reduces the complexity from O(TreeDepth) to O(1) per UI rebuild,
+  /// avoiding redundant tree traversals and object allocations.
   double _computeProgress(Session session) {
-    final navigator = OutcomeNavigator(widget.outcomes);
-    final contract = navigator.runningContract(session);
+    final contract = session.runningContract;
 
     final total =
         contract.fields.values.where((f) => f.required).length;
