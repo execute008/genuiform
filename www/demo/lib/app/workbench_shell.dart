@@ -104,7 +104,9 @@ class _WorkbenchShellState extends State<WorkbenchShell> {
           ),
         ),
         onControllerCreated: (c) => _controller.controllerRef.value = c,
-        scenarioId: _controller.currentScenarioId,
+        scenarioId: _controller.mascotEnabled.value
+            ? _controller.currentScenarioId
+            : null,
       ),
     );
   }
@@ -229,6 +231,8 @@ class _TopBar extends StatelessWidget {
           const SizedBox(width: AppSpacing.s4),
 
           const Spacer(),
+          _MascotToggle(controller: controller),
+          const SizedBox(width: AppSpacing.s3),
           _TemperatureSlider(notifier: controller.temperature),
           const SizedBox(width: AppSpacing.s3),
           IconButton(
@@ -554,6 +558,50 @@ class _ParseStatusFooter extends StatelessWidget {
           ],
         ],
       ),
+    );
+  }
+}
+
+// ── Mascot toggle ─────────────────────────────────────────────────────────────
+
+class _MascotToggle extends StatelessWidget {
+  const _MascotToggle({required this.controller});
+
+  final WorkbenchController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return ValueListenableBuilder<bool>(
+      valueListenable: controller.mascotEnabled,
+      builder: (context, enabled, _) {
+        return Tooltip(
+          message: enabled
+              ? 'Mascot on — disable per-scenario animated mascot'
+              : 'Mascot off — enable per-scenario animated mascot',
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                enabled
+                    ? Icons.emoji_emotions
+                    : Icons.emoji_emotions_outlined,
+                size: 16,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 4),
+              Switch(
+                value: enabled,
+                onChanged: (next) {
+                  controller.mascotEnabled.value = next;
+                  controller.refresh();
+                },
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
