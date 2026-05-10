@@ -149,6 +149,10 @@ class WorkbenchController extends ChangeNotifier {
 
   Future<void> init() async {
     await _geminiService.init();
+    // Defensive: ensure any listeners (e.g. AnimatedBuilder in the shell)
+    // rebuild after the async storage read completes, even if the shell does
+    // not call setState — guarantees a fresh frame post-init.
+    notifyListeners();
   }
 
   void setScenarioKey(String key) {
