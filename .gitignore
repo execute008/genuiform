@@ -43,3 +43,10 @@ lcov.info
 .claude/
 a2ui/build
 www/.sst
+
+# Node.js dependencies
+node_modules/
+**/node_modules/
+
+# Build directories
+**/build/
