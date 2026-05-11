@@ -11,6 +11,19 @@ import '../models/session.dart';
 import 'form_config.dart';
 
 // ---------------------------------------------------------------------------
+// Memoization Caches
+// ---------------------------------------------------------------------------
+
+/// ⚡ BOLT OPTIMIZATION: Use Expandos to memoize rendered sections of the
+/// system prompt. Since the underlying Contract, Posture, and OutcomeNode
+/// objects are immutable and stable, we can reuse their string representations
+/// to avoid redundant O(N) traversals on every turn.
+final _contractCache = Expando<String>();
+final _postureCache = Expando<String>();
+final _treeCache = Expando<String>();
+final _fullPromptCache = Expando<String>();
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -31,13 +44,30 @@ import 'form_config.dart';
 ///   7. INSTRUCTIONS
 ///   8. JSON-only directive
 String buildStaticSystemPrompt(FormConfig config) {
+  final iconSection = _renderIconRegistry();
+
+  // ⚡ BOLT OPTIMIZATION: Memoize the full static prompt based on the config.
+  // We include a check for the icon section in the rendering but since the
+  // icon registry is global and mutable, we must ensure that our top-level
+  // config cache is invalidated if the icon registry changes.
+  // By fetching iconSection first, we rely on _renderIconRegistry's internal
+  // invalidation. However, to keep this function O(1) when cached, we'd need
+  // to bake the icon count into the cache key.
+  final cached = _fullPromptCache[config];
+  if (cached != null) {
+    // If the icons changed, we must ignore the full prompt cache.
+    final names = IconRegistry.registeredIconNames;
+    if (_cachedIconCount == names.length) {
+      return cached;
+    }
+  }
+
   final contractSection = _renderContract(config.contract);
   final constraintsSection = _renderConstraints(config.constraints);
   final postureSection = _renderPosture(config.posture);
   final treeSection = _renderOutcomeTreeStatic(config.outcomes);
-  final iconSection = _renderIconRegistry();
 
-  return '''You are a form designer running an adaptive intake conversation.
+  final prompt = '''You are a form designer running an adaptive intake conversation.
 
 YOUR JOB EACH TURN:
 - Look at what's been collected so far.
@@ -75,6 +105,9 @@ INSTRUCTIONS:
   * User declined → emit `ask_step` to continue. Never re-offer the same exit.
 
 Return ONLY valid JSON matching the schema. No prose, no markdown.''';
+
+  _fullPromptCache[config] = prompt;
+  return prompt;
 }
 
 /// Builds a small per-turn context block containing only the information that
@@ -162,6 +195,10 @@ Return ONLY valid JSON: {"next_step_id": "<id from catalog>", "engagement": "str
 
 /// Bullet list of `field_id (Type, required/optional): description`.
 String _renderContract(Contract running) {
+  // ⚡ BOLT OPTIMIZATION: Memoize rendered contract string.
+  final cached = _contractCache[running];
+  if (cached != null) return cached;
+
   if (running.fields.isEmpty) {
     return '  (no fields defined)';
   }
@@ -176,7 +213,9 @@ String _renderContract(Contract running) {
             : '';
     return '  - $fieldId (${spec.type}, $reqLabel)$enumNote$desc';
   });
-  return lines.join('\n');
+  final result = lines.join('\n');
+  _contractCache[running] = result;
+  return result;
 }
 
 /// Bullet list, one per constraint variant, formatted for LLM readability.
@@ -211,11 +250,18 @@ String _constraintDescription(Constraint c) {
 
 /// Multi-line posture section with numeric knobs and one-sentence interpretations.
 String _renderPosture(Posture p) {
-  return '''  persistence: ${p.persistence}/5 — ${_persistenceLabel(p.persistence)}
+  // ⚡ BOLT OPTIMIZATION: Memoize rendered posture string.
+  final cached = _postureCache[p];
+  if (cached != null) return cached;
+
+  final result = '''  persistence: ${p.persistence}/5 — ${_persistenceLabel(p.persistence)}
   exploration: ${p.exploration}/5 — ${_explorationLabel(p.exploration)}
   pacing: ${p.pacing}/5 — ${_pacingLabel(p.pacing)}
   skipTolerance: ${p.skipTolerance}/5 — ${_skipToleranceLabel(p.skipTolerance)}
   voice: "${p.voice}"''';
+
+  _postureCache[p] = result;
+  return result;
 }
 
 String _persistenceLabel(int v) => switch (v) {
@@ -252,9 +298,15 @@ String _skipToleranceLabel(int v) => switch (v) {
 
 /// ASCII tree without any `<<<` current-node marker — stable across sessions.
 String _renderOutcomeTreeStatic(OutcomeNode root) {
+  // ⚡ BOLT OPTIMIZATION: Memoize rendered tree string.
+  final cached = _treeCache[root];
+  if (cached != null) return cached;
+
   final buffer = StringBuffer();
   _renderNodeStatic(root, '', true, buffer);
-  return buffer.toString().trimRight();
+  final result = buffer.toString().trimRight();
+  _treeCache[root] = result;
+  return result;
 }
 
 void _renderNodeStatic(
@@ -319,6 +371,7 @@ String _renderEngagement(EngagementSignal signal) {
 }
 
 String? _cachedIcons;
+int? _cachedIconCount;
 
 /// Comma-separated list of all registered icon names.
 ///
@@ -329,10 +382,18 @@ String? _cachedIcons;
 /// The registry contains 160+ names which are sorted and joined on every turn.
 /// This saves ~0.5ms of CPU time per prompt build and reduces string allocations.
 String _renderIconRegistry() {
-  if (_cachedIcons != null) return _cachedIcons!;
+  final names = IconRegistry.registeredIconNames;
+
+  // ⚡ BOLT OPTIMIZATION: Check if the number of icons changed before returning
+  // the cached string. This ensures the prompt stays correct if the consumer
+  // calls IconRegistry.register() at runtime.
+  if (_cachedIcons != null && _cachedIconCount == names.length) {
+    return _cachedIcons!;
+  }
 
   // Use a copy to avoid mutating the global registry list if it returns a reference.
-  final names = List<String>.from(IconRegistry.registeredIconNames)..sort();
-  _cachedIcons = names.join(', ');
+  final sortedNames = List<String>.from(names)..sort();
+  _cachedIcons = sortedNames.join(', ');
+  _cachedIconCount = names.length;
   return _cachedIcons!;
 }
