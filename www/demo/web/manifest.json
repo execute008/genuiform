@@ -1,6 +1,6 @@
 {
-    "name": "genuiform",
-    "short_name": "genuiform",
+    "name": "genuiform_demo",
+    "short_name": "genuiform_demo",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
