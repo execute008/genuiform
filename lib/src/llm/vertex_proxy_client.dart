@@ -137,7 +137,8 @@ class VertexProxyClient extends LlmClient {
 
     if (response.statusCode == 401 || response.statusCode == 403) {
       throw AuthError(
-        'Proxy returned HTTP ${response.statusCode}: ${response.body}',
+        'Proxy returned HTTP ${response.statusCode}. '
+        'Check server logs for details.',
       );
     }
     if (response.statusCode == 429) {
@@ -152,12 +153,14 @@ class VertexProxyClient extends LlmClient {
     }
     if (response.statusCode >= 500) {
       throw NetworkError(
-        'Proxy server error (HTTP ${response.statusCode}): ${response.body}',
+        'Proxy server error (HTTP ${response.statusCode}). '
+        'Check server logs for details.',
       );
     }
     if (response.statusCode >= 400) {
       throw UnknownError(
-        'Proxy returned HTTP ${response.statusCode}: ${response.body}',
+        'Proxy returned HTTP ${response.statusCode}. '
+        'Check server logs for details.',
       );
     }
 
