@@ -61,21 +61,38 @@
         iframe.style.width = toggled ? 'calc(100% - 1px)' : '100%';
       }
 
-      // Pump for the first 30 seconds after the iframe loads. Covers the
-      // cold-load LLM streaming response window. Once the user starts
-      // interacting the engine stays warm on its own.
-      let ticks = 0;
       function startHeartbeat() {
+        // Stop pumping as soon as the user interacts with the iframe — at that
+        // point the engine has work to do anyway, so it stays warm on its own.
+        // Same-origin iframe, so we can listen on its window directly.
+        let stopped = false;
+        function stop() { stopped = true; }
+        try {
+          const win = iframe.contentWindow;
+          const active = { once: true, capture: true };
+          const passive = { once: true, capture: true, passive: true };
+          win.addEventListener('mousedown', stop, active);
+          win.addEventListener('keydown', stop, active);
+          win.addEventListener('wheel', stop, passive);
+          win.addEventListener('touchstart', stop, passive);
+        } catch (e) {
+          // Cross-origin (shouldn't happen here) — fall through to time-based stop.
+        }
+
+        // Hard cap at ~5 s. Covers cold-load engine init + first LLM
+        // streaming response. If the user hasn't interacted by then, they've
+        // either got a slow network or are just looking at the screen, and
+        // the engine has had plenty of chances to settle.
+        let ticks = 0;
         const id = setInterval(() => {
           ticks++;
-          if (ticks > 150) { // 150 * 200ms = 30s
+          if (stopped || ticks > 50) { // 50 * 100ms = 5 s
             clearInterval(id);
-            // Restore canonical width
             iframe.style.width = '100%';
             return;
           }
           kickOnce();
-        }, 200);
+        }, 100);
       }
 
       if (iframe.contentDocument && iframe.contentDocument.readyState === 'complete') {
