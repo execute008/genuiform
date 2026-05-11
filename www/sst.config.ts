@@ -22,8 +22,11 @@ export default $config({
     const demo = new sst.aws.StaticSite("Demo", {
       path: "demo",
       build: {
-        command: "flutter build web --release --wasm",
-        output: "build/web",
+        // Builds Flutter under /app/ and assembles an iframe-wrapper site at
+        // build/wrap/. See demo/wrap/index.html for the rationale
+        // (flutter#186317 workaround).
+        command: "bash scripts/build-web-wrapped.sh",
+        output: "build/wrap",
       },
       domain: "workbench.genuiform.draht.dev",
     });

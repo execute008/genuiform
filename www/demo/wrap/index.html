@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>genuiform_demo</title>
+
+  <!--
+    This page is a thin iframe wrapper around the actual Flutter app at /app/.
+
+    Why the wrapper exists:
+    Flutter web release builds currently freeze the main render tree after
+    first paint — setState / Stream rebuilds run but don't paint until
+    *actual* `window.innerWidth` changes wake the platform-metrics path.
+    From regular page JS you cannot programmatically change the top window's
+    innerWidth (browsers block `window.resizeTo` for tabs).
+
+    But an iframe's `window.innerWidth` *is* the iframe element's box. The
+    parent page CAN resize the iframe element via CSS, and the iframe's
+    inner window then sees a real metrics change. That re-arms the engine
+    inside the iframe — same effect as the user manually resizing the
+    browser, without the user needing to.
+
+    Upstream issue: https://github.com/flutter/flutter/issues/186317
+  -->
+
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #131218;
+    }
+    #app {
+      border: 0;
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+  </style>
+</head>
+<body>
+  <iframe
+    id="app"
+    src="app/"
+    title="genuiform workbench"
+    allow="clipboard-read; clipboard-write"
+  ></iframe>
+
+  <script>
+    (function () {
+      const iframe = document.getElementById('app');
+
+      // Toggle the iframe's box by 1px to force the inner window's
+      // `innerWidth` to change. We alternate between 100% and calc(100% - 1px)
+      // so successive kicks register as new sizes.
+      let toggled = false;
+      function kickOnce() {
+        toggled = !toggled;
+        iframe.style.width = toggled ? 'calc(100% - 1px)' : '100%';
+      }
+
+      // Pump for the first 30 seconds after the iframe loads. Covers the
+      // cold-load LLM streaming response window. Once the user starts
+      // interacting the engine stays warm on its own.
+      let ticks = 0;
+      function startHeartbeat() {
+        const id = setInterval(() => {
+          ticks++;
+          if (ticks > 150) { // 150 * 200ms = 30s
+            clearInterval(id);
+            // Restore canonical width
+            iframe.style.width = '100%';
+            return;
+          }
+          kickOnce();
+        }, 200);
+      }
+
+      if (iframe.contentDocument && iframe.contentDocument.readyState === 'complete') {
+        startHeartbeat();
+      } else {
+        iframe.addEventListener('load', startHeartbeat, { once: true });
+      }
+    })();
+  </script>
+</body>
+</html>
