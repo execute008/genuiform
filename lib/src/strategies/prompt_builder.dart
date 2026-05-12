@@ -160,10 +160,17 @@ Return ONLY valid JSON: {"next_step_id": "<id from catalog>", "engagement": "str
 // Private rendering helpers
 // ---------------------------------------------------------------------------
 
+final _contractCache = Expando<String>();
+final _postureCache = Expando<String>();
+final _outcomeTreeCache = Expando<String>();
+
 /// Bullet list of `field_id (Type, required/optional): description`.
 String _renderContract(Contract running) {
+  final cached = _contractCache[running];
+  if (cached != null) return cached;
+
   if (running.fields.isEmpty) {
-    return '  (no fields defined)';
+    return _contractCache[running] = '  (no fields defined)';
   }
   final lines = running.fields.entries.map((entry) {
     final fieldId = entry.key;
@@ -176,7 +183,7 @@ String _renderContract(Contract running) {
             : '';
     return '  - $fieldId (${spec.type}, $reqLabel)$enumNote$desc';
   });
-  return lines.join('\n');
+  return _contractCache[running] = lines.join('\n');
 }
 
 /// Bullet list, one per constraint variant, formatted for LLM readability.
@@ -211,7 +218,10 @@ String _constraintDescription(Constraint c) {
 
 /// Multi-line posture section with numeric knobs and one-sentence interpretations.
 String _renderPosture(Posture p) {
-  return '''  persistence: ${p.persistence}/5 — ${_persistenceLabel(p.persistence)}
+  final cached = _postureCache[p];
+  if (cached != null) return cached;
+
+  return _postureCache[p] = '''  persistence: ${p.persistence}/5 — ${_persistenceLabel(p.persistence)}
   exploration: ${p.exploration}/5 — ${_explorationLabel(p.exploration)}
   pacing: ${p.pacing}/5 — ${_pacingLabel(p.pacing)}
   skipTolerance: ${p.skipTolerance}/5 — ${_skipToleranceLabel(p.skipTolerance)}
@@ -252,9 +262,12 @@ String _skipToleranceLabel(int v) => switch (v) {
 
 /// ASCII tree without any `<<<` current-node marker — stable across sessions.
 String _renderOutcomeTreeStatic(OutcomeNode root) {
+  final cached = _outcomeTreeCache[root];
+  if (cached != null) return cached;
+
   final buffer = StringBuffer();
   _renderNodeStatic(root, '', true, buffer);
-  return buffer.toString().trimRight();
+  return _outcomeTreeCache[root] = buffer.toString().trimRight();
 }
 
 void _renderNodeStatic(
@@ -319,6 +332,7 @@ String _renderEngagement(EngagementSignal signal) {
 }
 
 String? _cachedIcons;
+int? _cachedIconCount;
 
 /// Comma-separated list of all registered icon names.
 ///
@@ -329,10 +343,14 @@ String? _cachedIcons;
 /// The registry contains 160+ names which are sorted and joined on every turn.
 /// This saves ~0.5ms of CPU time per prompt build and reduces string allocations.
 String _renderIconRegistry() {
-  if (_cachedIcons != null) return _cachedIcons!;
+  final currentNames = IconRegistry.registeredIconNames;
+  if (_cachedIcons != null && _cachedIconCount == currentNames.length) {
+    return _cachedIcons!;
+  }
 
   // Use a copy to avoid mutating the global registry list if it returns a reference.
-  final names = List<String>.from(IconRegistry.registeredIconNames)..sort();
-  _cachedIcons = names.join(', ');
+  final sortedNames = List<String>.from(currentNames)..sort();
+  _cachedIcons = sortedNames.join(', ');
+  _cachedIconCount = currentNames.length;
   return _cachedIcons!;
 }
