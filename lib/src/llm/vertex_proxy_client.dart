@@ -136,8 +136,10 @@ class VertexProxyClient extends LlmClient {
     }
 
     if (response.statusCode == 401 || response.statusCode == 403) {
+      // ignore: avoid_print
+      print('VertexProxyClient: HTTP ${response.statusCode} error: ${response.body}');
       throw AuthError(
-        'Proxy returned HTTP ${response.statusCode}: ${response.body}',
+        'Proxy returned HTTP ${response.statusCode}. Check server logs for details.',
       );
     }
     if (response.statusCode == 429) {
@@ -151,13 +153,17 @@ class VertexProxyClient extends LlmClient {
       );
     }
     if (response.statusCode >= 500) {
+      // ignore: avoid_print
+      print('VertexProxyClient: HTTP ${response.statusCode} error: ${response.body}');
       throw NetworkError(
-        'Proxy server error (HTTP ${response.statusCode}): ${response.body}',
+        'Proxy server error (HTTP ${response.statusCode}). Check server logs for details.',
       );
     }
     if (response.statusCode >= 400) {
+      // ignore: avoid_print
+      print('VertexProxyClient: HTTP ${response.statusCode} error: ${response.body}');
       throw UnknownError(
-        'Proxy returned HTTP ${response.statusCode}: ${response.body}',
+        'Proxy returned HTTP ${response.statusCode}. Check server logs for details.',
       );
     }
 
@@ -177,8 +183,10 @@ class VertexProxyClient extends LlmClient {
         throw const FormatException('Unexpected envelope type');
       }
     } catch (e) {
+      // ignore: avoid_print
+      print('VertexProxyClient: Failed to parse proxy response: ${response.body}');
       throw SchemaError(
-        'Failed to parse proxy response envelope as JSON: $e',
+        'Failed to parse proxy response envelope as JSON. Check server logs for details.',
       );
     }
 
@@ -198,8 +206,10 @@ class VertexProxyClient extends LlmClient {
           }
         }
       } catch (e) {
+        // ignore: avoid_print
+        print('VertexProxyClient: Failed to extract text from chunk: $chunk');
         throw SchemaError(
-          'Failed to extract text from proxy response chunk: $e',
+          'Failed to extract text from proxy response chunk. Check server logs for details.',
         );
       }
     }
@@ -208,8 +218,10 @@ class VertexProxyClient extends LlmClient {
     try {
       jsonDecode(accumulated);
     } catch (e) {
+      // ignore: avoid_print
+      print('VertexProxyClient: Accumulated text is not valid JSON: $accumulated');
       throw SchemaError(
-        'Proxy response text is not valid JSON: $e',
+        'Proxy response text is not valid JSON. Check server logs for details.',
       );
     }
 
