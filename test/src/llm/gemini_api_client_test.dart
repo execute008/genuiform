@@ -373,19 +373,25 @@ void main() {
       expect(capturedHeaders['x-goog-api-key'], 'AIza-test-key');
     });
 
-    test('createCachedContent throws CacheError on non-2xx response', () async {
+    test('createCachedContent throws CacheError on non-2xx response and sanitizes', () async {
       final client = GeminiApiClient(
         apiKey: 'AIza-test-key',
         httpClient: MockClient((_) async =>
-            http.Response('{"error":"quota exceeded"}', 429)),
+            http.Response('{"error":"quota_exceeded_secret_leak"}', 429)),
+      );
+
+      final call = client.createCachedContent(
+        systemInstruction: 'sys',
+        model: 'gemini-2.5-flash',
       );
 
       await expectLater(
-        client.createCachedContent(
-          systemInstruction: 'sys',
-          model: 'gemini-2.5-flash',
-        ),
-        throwsA(isA<CacheError>()),
+        call,
+        throwsA(isA<CacheError>().having(
+          (e) => e.message,
+          'message',
+          isNot(contains('quota_exceeded_secret_leak')),
+        )),
       );
     });
 
@@ -440,35 +446,47 @@ void main() {
   });
 
   group('GeminiApiClient — error handling', () {
-    test('HTTP 401 maps to AuthError', () async {
+    test('HTTP 401 maps to AuthError and sanitizes message', () async {
       final client = _makeClient(
-        (request) async => http.Response('{"error":"unauthorized"}', 401),
+        (request) async => http.Response('{"error":"unauthorized_secret_leak"}', 401),
+      );
+
+      final call = client.generate(
+        systemPrompt: 'sys',
+        messages: [],
+        responseSchema: {},
+        model: 'gemini-2.5-flash',
       );
 
       await expectLater(
-        client.generate(
-          systemPrompt: 'sys',
-          messages: [],
-          responseSchema: {},
-          model: 'gemini-2.5-flash',
-        ),
-        emitsError(isA<AuthError>()),
+        call,
+        emitsError(isA<AuthError>().having(
+          (e) => e.message,
+          'message',
+          isNot(contains('unauthorized_secret_leak')),
+        )),
       );
     });
 
-    test('HTTP 403 maps to AuthError', () async {
+    test('HTTP 403 maps to AuthError and sanitizes message', () async {
       final client = _makeClient(
-        (request) async => http.Response('{"error":"forbidden"}', 403),
+        (request) async => http.Response('{"error":"forbidden_secret_leak"}', 403),
+      );
+
+      final call = client.generate(
+        systemPrompt: 'sys',
+        messages: [],
+        responseSchema: {},
+        model: 'gemini-2.5-flash',
       );
 
       await expectLater(
-        client.generate(
-          systemPrompt: 'sys',
-          messages: [],
-          responseSchema: {},
-          model: 'gemini-2.5-flash',
-        ),
-        emitsError(isA<AuthError>()),
+        call,
+        emitsError(isA<AuthError>().having(
+          (e) => e.message,
+          'message',
+          isNot(contains('forbidden_secret_leak')),
+        )),
       );
     });
 
@@ -498,38 +516,51 @@ void main() {
       );
     });
 
-    test('HTTP 500 maps to NetworkError', () async {
+    test('HTTP 500 maps to NetworkError and sanitizes message', () async {
       final client = _makeClient(
-        (request) async => http.Response('boom', 500),
+        (request) async => http.Response('boom_secret_leak', 500),
+      );
+
+      final call = client.generate(
+        systemPrompt: 'sys',
+        messages: [],
+        responseSchema: {},
+        model: 'gemini-2.5-flash',
       );
 
       await expectLater(
-        client.generate(
-          systemPrompt: 'sys',
-          messages: [],
-          responseSchema: {},
-          model: 'gemini-2.5-flash',
-        ),
-        emitsError(isA<NetworkError>()),
+        call,
+        emitsError(isA<NetworkError>().having(
+          (e) => e.message,
+          'message',
+          isNot(contains('boom_secret_leak')),
+        )),
       );
     });
 
-    test('malformed SSE event JSON maps to SchemaError', () async {
+    test('malformed SSE event JSON maps to SchemaError and sanitizes message', () async {
+      const malformedData = 'this-is-not-json-secret-leak';
       final client = _makeClient(
         (request) async => http.Response(
-          'data: this-is-not-json\n\n',
+          'data: $malformedData\n\n',
           200,
         ),
       );
 
+      final call = client.generate(
+        systemPrompt: 'sys',
+        messages: [],
+        responseSchema: {},
+        model: 'gemini-2.5-flash',
+      );
+
       await expectLater(
-        client.generate(
-          systemPrompt: 'sys',
-          messages: [],
-          responseSchema: {},
-          model: 'gemini-2.5-flash',
-        ),
-        emitsError(isA<SchemaError>()),
+        call,
+        emitsError(isA<SchemaError>().having(
+          (e) => e.message,
+          'message',
+          isNot(contains(malformedData)),
+        )),
       );
     });
 

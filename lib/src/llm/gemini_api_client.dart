@@ -45,7 +45,10 @@ import '../models/message.dart';
 /// ```
 class GeminiApiClient extends LlmClient {
   /// The Gemini API key (typically `AIza...`-prefixed).
-  final String apiKey;
+  final String _apiKey;
+
+  /// Returns the Gemini API key.
+  String get apiKey => _apiKey;
 
   final http.Client _httpClient;
 
@@ -57,9 +60,10 @@ class GeminiApiClient extends LlmClient {
   /// from `package:http/testing.dart`). If omitted, a real [http.Client] is
   /// used.
   GeminiApiClient({
-    required this.apiKey,
+    required String apiKey,
     http.Client? httpClient,
-  }) : _httpClient = httpClient ?? http.Client();
+  })  : _apiKey = apiKey,
+        _httpClient = httpClient ?? http.Client();
 
   Uri _buildUri(String model) {
     return Uri.parse(
@@ -168,7 +172,7 @@ class GeminiApiClient extends LlmClient {
     }
 
     final request = http.Request('POST', uri);
-    request.headers['x-goog-api-key'] = apiKey;
+    request.headers['x-goog-api-key'] = _apiKey;
     request.headers['Content-Type'] = 'application/json';
     request.body = jsonEncode(payload);
 
@@ -188,8 +192,13 @@ class GeminiApiClient extends LlmClient {
     final status = response.statusCode;
     if (status != 200) {
       final body = await response.stream.bytesToString();
+      // ignore: avoid_print
+      print('GeminiApiClient error (HTTP $status): $body');
+
       if (status == 401 || status == 403) {
-        throw AuthError('Gemini API returned HTTP $status: $body');
+        throw AuthError(
+          'Gemini API returned HTTP $status. Check server logs for details.',
+        );
       }
       if (status == 429) {
         throw RateLimitError(
@@ -199,7 +208,7 @@ class GeminiApiClient extends LlmClient {
       }
       if (status >= 500) {
         throw NetworkError(
-          'Gemini API server error (HTTP $status): $body',
+          'Gemini API server error (HTTP $status). Check server logs for details.',
         );
       }
       // 404 on a cachedContent reference means the cache has expired.
@@ -209,7 +218,7 @@ class GeminiApiClient extends LlmClient {
         );
       }
       throw SchemaError(
-        'Gemini API rejected request (HTTP $status): $body',
+        'Gemini API rejected request (HTTP $status). Check server logs for details.',
       );
     }
 
@@ -232,8 +241,10 @@ class GeminiApiClient extends LlmClient {
       try {
         chunkMap = jsonDecode(data) as Map<String, dynamic>;
       } catch (e) {
-        throw SchemaError(
-          'Failed to parse Gemini SSE event as JSON: $e',
+        // ignore: avoid_print
+        print('GeminiApiClient: failed to parse SSE event: $data');
+        throw const SchemaError(
+          'Failed to parse Gemini SSE event as JSON. Check server logs for details.',
         );
       }
 
@@ -266,8 +277,10 @@ class GeminiApiClient extends LlmClient {
       }
       return buffer.toString();
     } catch (e) {
-      throw SchemaError(
-        'Failed to extract text from Gemini SSE event: $e',
+      // ignore: avoid_print
+      print('GeminiApiClient: failed to extract text from SSE event: $chunkMap');
+      throw const SchemaError(
+        'Failed to extract text from Gemini SSE event. Check server logs for details.',
       );
     }
   }
@@ -294,7 +307,7 @@ class GeminiApiClient extends LlmClient {
       response = await _httpClient.post(
         uri,
         headers: {
-          'x-goog-api-key': apiKey,
+          'x-goog-api-key': _apiKey,
           'Content-Type': 'application/json',
         },
         body: body,
@@ -311,9 +324,11 @@ class GeminiApiClient extends LlmClient {
     }
 
     if (response.statusCode != 200 && response.statusCode != 201) {
+      // ignore: avoid_print
+      print('GeminiApiClient: createCachedContent failed: ${response.body}');
       throw CacheError(
-        'Failed to create cached content (HTTP ${response.statusCode}): '
-        '${response.body}',
+        'Failed to create cached content (HTTP ${response.statusCode}). '
+        'Check server logs for details.',
       );
     }
 
@@ -321,8 +336,11 @@ class GeminiApiClient extends LlmClient {
     try {
       json = jsonDecode(response.body) as Map<String, dynamic>;
     } catch (e) {
-      throw CacheError(
-          'Failed to parse createCachedContent response: $e');
+      // ignore: avoid_print
+      print('GeminiApiClient: createCachedContent parse failed: ${response.body}');
+      throw const CacheError(
+        'Failed to parse createCachedContent response. Check server logs for details.',
+      );
     }
 
     final name = json['name'] as String?;
@@ -339,7 +357,7 @@ class GeminiApiClient extends LlmClient {
     try {
       final response = await _httpClient.delete(
         uri,
-        headers: {'x-goog-api-key': apiKey},
+        headers: {'x-goog-api-key': _apiKey},
       );
       // 404 means it already expired — that's fine. Any other non-2xx is also
       // swallowed since deletion is best-effort.
@@ -429,7 +447,7 @@ OUTPUT SHAPE: just `<svg ...>` then 8-12 shape elements then `</svg>`. Nothing e
           .post(
             uri,
             headers: {
-              'x-goog-api-key': apiKey,
+              'x-goog-api-key': _apiKey,
               'Content-Type': 'application/json',
             },
             body: requestBody,

@@ -121,24 +121,30 @@ void main() {
       expect(body, contains('"responseSchema"'));
     });
 
-    test('maps HTTP 401 to AuthError', () async {
+    test('maps HTTP 401 to AuthError and sanitizes', () async {
       final client = VertexProxyClient(
         endpoint: 'https://example.com/proxy',
         authProvider: () async => 'token',
         httpClient:
-            MockClient((_) async => http.Response('Unauthorized', 401)),
+            MockClient((_) async => http.Response('Unauthorized-secret-leak', 401)),
       );
 
+      final call = client
+          .generate(
+            systemPrompt: 'sys',
+            messages: [Message(role: MessageRole.user, content: 'hi')],
+            responseSchema: {},
+            model: 'gemini-2.5-flash',
+          )
+          .first;
+
       await expectLater(
-        client
-            .generate(
-              systemPrompt: 'sys',
-              messages: [Message(role: MessageRole.user, content: 'hi')],
-              responseSchema: {},
-              model: 'gemini-2.5-flash',
-            )
-            .first,
-        throwsA(isA<AuthError>()),
+        call,
+        throwsA(isA<AuthError>().having(
+          (e) => e.message,
+          'message',
+          isNot(contains('Unauthorized-secret-leak')),
+        )),
       );
     });
 
@@ -170,47 +176,60 @@ void main() {
       }
     });
 
-    test('maps HTTP 5xx to NetworkError', () async {
+    test('maps HTTP 5xx to NetworkError and sanitizes', () async {
       final client = VertexProxyClient(
         endpoint: 'https://example.com/proxy',
         authProvider: () async => 'token',
         httpClient: MockClient(
-          (_) async => http.Response('Internal Server Error', 502),
+          (_) async => http.Response('Internal-Server-Error-secret-leak', 502),
         ),
       );
 
+      final call = client
+          .generate(
+            systemPrompt: 'sys',
+            messages: [Message(role: MessageRole.user, content: 'hi')],
+            responseSchema: {},
+            model: 'gemini-2.5-flash',
+          )
+          .first;
+
       await expectLater(
-        client
-            .generate(
-              systemPrompt: 'sys',
-              messages: [Message(role: MessageRole.user, content: 'hi')],
-              responseSchema: {},
-              model: 'gemini-2.5-flash',
-            )
-            .first,
-        throwsA(isA<NetworkError>()),
+        call,
+        throwsA(isA<NetworkError>().having(
+          (e) => e.message,
+          'message',
+          isNot(contains('Internal-Server-Error-secret-leak')),
+        )),
       );
     });
 
-    test('malformed JSON envelope raises SchemaError', () async {
+    test('malformed JSON envelope raises SchemaError and sanitizes', () async {
+      const malformedBody = 'not-json-at-all-secret-leak';
       final client = VertexProxyClient(
         endpoint: 'https://example.com/proxy',
         authProvider: () async => 'token',
         httpClient: MockClient(
-          (_) async => http.Response('not json at all', 200),
+          (_) async => http.Response(malformedBody, 200),
         ),
       );
 
+      final call = client
+          .generate(
+            systemPrompt: 'sys',
+            messages: [Message(role: MessageRole.user, content: 'hi')],
+            responseSchema: {},
+            model: 'gemini-2.5-flash',
+          )
+          .first;
+
       await expectLater(
-        client
-            .generate(
-              systemPrompt: 'sys',
-              messages: [Message(role: MessageRole.user, content: 'hi')],
-              responseSchema: {},
-              model: 'gemini-2.5-flash',
-            )
-            .first,
-        throwsA(isA<SchemaError>()),
+        call,
+        throwsA(isA<SchemaError>().having(
+          (e) => e.message,
+          'message',
+          isNot(contains(malformedBody)),
+        )),
       );
     });
 
